@@ -1,0 +1,216 @@
+import os
+import time
+import json
+from typing import Dict, Optional
+from functools import lru_cache
+from dotenv import load_dotenv
+from pydantic import BaseModel
+import re
+
+from openai import OpenAI
+from pinecone import Pinecone
+
+from langchain_openai import ChatOpenAI
+from langchain.output_parsers import PydanticOutputParser, OutputFixingParser
+from langchain.prompts import PromptTemplate
+from langchain_core.runnables import RunnableSequence
+
+# --- Load environment ---
+load_dotenv()
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+PINECONE_API_KEY = os.getenv("PINECONE_API_KEY")
+INDEX_NAME = "plan-your-trip"
+
+# --- Clients ---
+client = OpenAI(api_key=OPENAI_API_KEY)
+pc = Pinecone(api_key=PINECONE_API_KEY)
+index = pc.Index(INDEX_NAME)
+llm = ChatOpenAI(openai_api_key=OPENAI_API_KEY, model_name="gpt-4-turbo", temperature=0.5)
+
+# --- Embeddings & RAG ---
+@lru_cache(maxsize=1000)
+def cached_embedding_call(text: str):
+    return tuple(client.embeddings.create(
+        model="text-embedding-ada-002",
+        input=[text]
+    ).data[0].embedding)
+
+def get_cached_embedding(text: str):
+    return list(cached_embedding_call(text))
+
+def normalize_destination(input_str: str) -> str:
+    """
+    Normalize destination to match Pinecone metadata format.
+    Converts: "Dallas TX" or "dallas,tx" => "Dallas, TX"
+    """
+    if not input_str:
+        return ""
+
+    # Remove extra whitespace and fix common separators
+    cleaned = input_str.strip().lower()
+    cleaned = re.sub(r"[\s,]+", " ", cleaned)  # normalize whitespace and commas
+    parts = cleaned.split()
+
+    if len(parts) >= 2:
+        city = " ".join(parts[:-1])
+        state = parts[-1].upper()
+        return f"{city.title()}, {state}"
+    else:
+        return input_str.title()
+
+def retrieve_relevant_transcripts(query, destination=None, with_kids=None, with_elderly=None, top_k=10, token_limit=1500):
+    start_time = time.time()
+    query_embedding = get_cached_embedding(query)
+
+    # === Build metadata filter ===
+    filters = {}
+    filters["destination"] = destination.lower()
+    filters["with_kids"] = with_kids
+    filters["with_elderly"] = with_elderly
+
+    search_results = index.query(
+        vector=query_embedding,
+        top_k=top_k,
+        include_metadata=True,
+        filter=filters  # Use Pinecone filtering!
+    )
+    matches = search_results.get("matches", [])
+    if not matches:
+        print("⚠️ No relevant transcripts found.")
+        return ""
+
+    retrieved_texts, total_tokens = [], 0
+    for match in matches:
+        text = match["metadata"].get("text", "")
+        token_count = len(text.split())
+        if total_tokens + token_count <= token_limit:
+            retrieved_texts.append(text)
+            total_tokens += token_count
+        else:
+            break
+
+    print(f"🧲 Retrieval took {time.time() - start_time:.2f}s with filter {filters}")
+    return " ".join(retrieved_texts)
+
+
+# --- Output Schema ---
+class SuggestedItem(BaseModel):
+    description: str
+    badge: Optional[str] = None  # e.g., "trending"
+
+class StructuredItineraryResponse(BaseModel):
+    Suggested_Things_to_Do: Dict[str, SuggestedItem]
+
+parser = PydanticOutputParser(pydantic_object=StructuredItineraryResponse)
+retry_parser = OutputFixingParser.from_llm(llm=llm, parser=parser)
+
+# --- Prompt Template ---
+prompt_template = PromptTemplate(
+    template="""
+You are a helpful travel planner for {destination}.
+
+Recommend at least {min_count} landmarks or events for a visitor staying {travel_days} days.
+
+Use the retrieved context below, supplementing with your own knowledge.
+
+Traveler Info:
+{traveler_notes}
+
+Instructions:
+- Start with high-view-count or latest places in context, that are suitable to traveler.
+- Prioritize **popular**, **recently opened**, or **upcoming** events.
+- Only include places that are realistically reachable by car or transit within 3 hours of {destination}. 
+- Do NOT include places that require long highway trips, flights, or inter-city trains.
+- EXCLUDE bars, lounges, restaurants, cafes, and food-only destinations.
+- You can include places that offer food only if it's part of a larger family or cultural experience (e.g., a fair or theme park).
+- List specific museums if possible, rather than umbrella terms like "Smithsonian Museums"
+
+Examples of GOOD entries for Dallas TX if with kids aged 3:
+- "Peppa Pig Theme Park": An recently opened toddler park themed around Peppa Pig.
+- "Dallas Arboretum": Botanical garden with a dedicated children garden.
+- "Crayola Experience Plano": Hands-on creative experience for young children.
+- "State Fair of Texas": Latest cultural and family-friendly event with rides, food, and activities.
+
+Examples of BAD entries:
+- "Pecan Lodge Barbecue", "Vinyl Lounge", "Galveston Day Trip" (too far)
+
+Output Format (STRICT):
+Return this exact structure in JSON format using the landmark name as the key, and a dictionary with:
+  - "description": short phrase
+  - "badge": optional (only include if landmark is trending or new)
+
+{{
+  "Suggested_Things_to_Do": {{
+    "Landmark Name A": {{
+      "description": "Short phrase",
+      "badge": "trending"
+    }},
+    "Landmark Name B": {{
+      "description": "Short phrase"
+    }}
+  }}
+}}
+
+Context:
+{retrieved_context}
+
+{format_instructions}
+""",
+    input_variables=["destination", "travel_days", "min_count", "retrieved_context", "traveler_notes"],
+    partial_variables={"format_instructions": parser.get_format_instructions()},
+)
+
+# --- Main Function ---
+def generate_structured_itinerary(destination: str, travel_days: int, with_kids=False, kids_age=None, with_elderly=False):
+    print("🚀 Generating itinerary...")
+    total_start = time.time()
+
+    modifier = f" with {kids_age}-year-old kid" if with_kids and kids_age else " with kids" if with_kids else ""
+    destination_normalized = normalize_destination(destination)
+
+    context = retrieve_relevant_transcripts(
+        f"{destination} things to do{modifier}",
+        destination=destination_normalized,
+        with_kids=with_kids,
+        with_elderly=with_elderly
+    )
+
+    if not context.strip():
+        print("⚠️ No relevant transcripts found. Proceeding without context.")
+        context = ""  # Fallback to LLM-only generation
+
+    min_required = max(4 * travel_days, 12)
+    print(f"📌 Enforcing minimum of {min_required} items")
+
+    traveler_notes = []
+    if with_kids and kids_age:
+        traveler_notes.append(f"Prioritize activities suitable for {kids_age}-year-old children.")
+    elif with_kids:
+        traveler_notes.append("Prioritize child-friendly landmarks and activities.")
+    elif with_elderly:
+        traveler_notes.append("Include comfortable, low-exertion activities.")
+    traveler_notes = " ".join(traveler_notes)
+
+    chain: RunnableSequence = prompt_template | llm | retry_parser
+    llm_start = time.time()
+
+    result = chain.invoke({
+        "destination": destination,
+        "travel_days": travel_days,
+        "min_count": min_required,
+        "retrieved_context": context,
+        "traveler_notes": traveler_notes
+    })
+
+    print(f"💬 LLM response in {time.time() - llm_start:.2f}s")
+
+    try:
+        actual_count = len(result.Suggested_Things_to_Do)
+        if actual_count < min_required:
+            return {"error": f"Only {actual_count} valid items after filtering."}
+        print(f"✅ Success in {time.time() - total_start:.2f}s")
+        return result.model_dump()
+    except Exception as e:
+        return {"error": f"Failed to validate result: {str(e)}"}
+
+

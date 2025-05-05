@@ -1,0 +1,9 @@
+fastapi
+uvicorn
+openai
+pinecone>=3.0.0
+python-dotenv
+langchain
+langchain-openai 
+langchain-community
+pydantic

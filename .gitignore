@@ -1,0 +1,9 @@
+.env
+*.pkl
+*.faiss
+*secret*
+*token*
+*.vtt
+*pyc
+traveler_vlog/mistral-lora-output/
+.DS_Store
