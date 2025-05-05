@@ -1,0 +1,16 @@
+name: Ping Render Backend
+
+on:
+  schedule:
+    - cron: '*/10 12-23 * * *'  # 7 AM – 6 PM CT
+    - cron: '*/10 0-4 * * *'    # 7 PM – 11 PM CT
+  workflow_dispatch: # allows manual trigger from Actions tab
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Curl the backend
+        run: |
+          echo "Pinging backend at $(date)"
+          curl -s -o /dev/null -w "%{http_code}" https://plan-your-trip-wcaj.onrender.com/
