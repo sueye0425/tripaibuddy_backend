@@ -1,9 +1,10 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from rag import generate_structured_itinerary
-from schema import LandmarkSelection, DayItinerary
-from complete_itinerary import complete_itinerary_from_landmarks
+from typing import Union, List, Optional
+from .rag import generate_structured_itinerary
+from .schema import LandmarkSelection, DayItinerary
+from .complete_itinerary import complete_itinerary_from_landmarks
 
 app = FastAPI()
 
@@ -19,7 +20,7 @@ class ItineraryRequest(BaseModel):
     destination: str
     travel_days: int
     with_kids: bool = False
-    kids_age: int = None
+    kids_age: Optional[Union[int, List[int]]] = None
     with_elderly: bool = False
 
 @app.post("/generate")

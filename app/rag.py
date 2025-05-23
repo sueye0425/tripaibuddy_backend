@@ -165,7 +165,18 @@ def generate_structured_itinerary(destination: str, travel_days: int, with_kids=
     print("🚀 Generating itinerary...")
     total_start = time.time()
 
-    modifier = f" with {kids_age}-year-old kid" if with_kids and kids_age else " with kids" if with_kids else ""
+    # Handle backward compatibility - convert single age to list
+    if kids_age is not None and not isinstance(kids_age, list):
+        kids_age = [kids_age]
+    
+    # Build modifier string for search query
+    modifier = ""
+    if with_kids and kids_age:
+        avg_age = sum(kids_age) / len(kids_age)
+        modifier = f" with {int(avg_age)}-year-old kid"
+    elif with_kids:
+        modifier = " with kids"
+        
     destination_normalized = normalize_destination(destination)
 
     context = retrieve_relevant_transcripts(
@@ -182,9 +193,24 @@ def generate_structured_itinerary(destination: str, travel_days: int, with_kids=
     min_required = max(4 * travel_days, 12)
     print(f"📌 Enforcing minimum of {min_required} items")
 
+    # Build traveler notes with age range considerations
     traveler_notes = []
     if with_kids and kids_age:
-        traveler_notes.append(f"Prioritize activities suitable for {kids_age}-year-old children.")
+        min_age = min(kids_age)
+        max_age = max(kids_age)
+        
+        if min_age < 6:
+            traveler_notes.append("Include toddler-friendly attractions with minimal walking.")
+        if any(age >= 3 and age <= 12 for age in kids_age):
+            traveler_notes.append("Prioritize interactive museums, theme parks, and hands-on activities.")
+        if max_age > 10:
+            traveler_notes.append("Include more adventurous activities suitable for pre-teens.")
+            
+        if len(kids_age) == 1:
+            traveler_notes.append(f"Prioritize activities suitable for {kids_age[0]}-year-old children.")
+        else:
+            ages_str = ", ".join(str(age) for age in kids_age)
+            traveler_notes.append(f"Prioritize activities suitable for children aged {ages_str}.")
     elif with_kids:
         traveler_notes.append("Prioritize child-friendly landmarks and activities.")
     elif with_elderly:
