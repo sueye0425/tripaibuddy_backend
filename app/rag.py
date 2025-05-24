@@ -21,19 +21,45 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 PINECONE_API_KEY = os.getenv("PINECONE_API_KEY")
 INDEX_NAME = "plan-your-trip"
 
+if not OPENAI_API_KEY:
+    raise ValueError("OPENAI_API_KEY environment variable is not set")
+if not PINECONE_API_KEY:
+    raise ValueError("PINECONE_API_KEY environment variable is not set")
+
 # --- Clients ---
-client = OpenAI(api_key=OPENAI_API_KEY)
-pc = Pinecone(api_key=PINECONE_API_KEY)
-index = pc.Index(INDEX_NAME)
-llm = ChatOpenAI(openai_api_key=OPENAI_API_KEY, model_name="gpt-4-turbo", temperature=0.5)
+try:
+    client = OpenAI(
+        api_key=OPENAI_API_KEY,
+        timeout=30.0,  # 30 second timeout
+        max_retries=2  # Only retry twice
+    )
+    pc = Pinecone(api_key=PINECONE_API_KEY)
+    index = pc.Index(INDEX_NAME)
+    llm = ChatOpenAI(
+        openai_api_key=OPENAI_API_KEY,
+        model_name="gpt-4-turbo",
+        temperature=0.5,
+        request_timeout=30  # 30 second timeout
+    )
+    print("✅ Successfully initialized all API clients")
+except Exception as e:
+    print(f"❌ Error initializing API clients: {str(e)}")
+    raise
 
 # --- Embeddings & RAG ---
 @lru_cache(maxsize=1000)
 def cached_embedding_call(text: str):
-    return tuple(client.embeddings.create(
-        model="text-embedding-ada-002",
-        input=[text]
-    ).data[0].embedding)
+    try:
+        start_time = time.time()
+        result = client.embeddings.create(
+            model="text-embedding-ada-002",
+            input=[text]
+        )
+        print(f"📊 Embedding generated in {time.time() - start_time:.2f}s")
+        return tuple(result.data[0].embedding)
+    except Exception as e:
+        print(f"❌ Error generating embedding: {str(e)}")
+        raise
 
 def get_cached_embedding(text: str):
     return list(cached_embedding_call(text))
@@ -59,38 +85,43 @@ def normalize_destination(input_str: str) -> str:
         return input_str.title()
 
 def retrieve_relevant_transcripts(query, destination=None, with_kids=None, with_elderly=None, top_k=10, token_limit=1500):
-    start_time = time.time()
-    query_embedding = get_cached_embedding(query)
+    try:
+        start_time = time.time()
+        query_embedding = get_cached_embedding(query)
 
-    # === Build metadata filter ===
-    filters = {}
-    filters["destination"] = destination.lower()
-    filters["with_kids"] = with_kids
-    filters["with_elderly"] = with_elderly
+        # === Build metadata filter ===
+        filters = {}
+        filters["destination"] = destination.lower()
+        filters["with_kids"] = with_kids
+        filters["with_elderly"] = with_elderly
 
-    search_results = index.query(
-        vector=query_embedding,
-        top_k=top_k,
-        include_metadata=True,
-        filter=filters  # Use Pinecone filtering!
-    )
-    matches = search_results.get("matches", [])
-    if not matches:
-        print("⚠️ No relevant transcripts found.")
-        return ""
+        print(f"🔍 Querying Pinecone with filters: {filters}")
+        search_results = index.query(
+            vector=query_embedding,
+            top_k=top_k,
+            include_metadata=True,
+            filter=filters  # Use Pinecone filtering!
+        )
+        matches = search_results.get("matches", [])
+        if not matches:
+            print("⚠️ No relevant transcripts found.")
+            return ""
 
-    retrieved_texts, total_tokens = [], 0
-    for match in matches:
-        text = match["metadata"].get("text", "")
-        token_count = len(text.split())
-        if total_tokens + token_count <= token_limit:
-            retrieved_texts.append(text)
-            total_tokens += token_count
-        else:
-            break
+        retrieved_texts, total_tokens = [], 0
+        for match in matches:
+            text = match["metadata"].get("text", "")
+            token_count = len(text.split())
+            if total_tokens + token_count <= token_limit:
+                retrieved_texts.append(text)
+                total_tokens += token_count
+            else:
+                break
 
-    print(f"🧲 Retrieval took {time.time() - start_time:.2f}s with filter {filters}")
-    return " ".join(retrieved_texts)
+        print(f"🧲 Retrieval took {time.time() - start_time:.2f}s with filter {filters}")
+        return " ".join(retrieved_texts)
+    except Exception as e:
+        print(f"❌ Error in retrieve_relevant_transcripts: {str(e)}")
+        raise
 
 
 # --- Output Schema ---
@@ -162,81 +193,97 @@ Context:
 
 # --- Main Function ---
 def generate_structured_itinerary(destination: str, travel_days: int, with_kids=False, kids_age=None, with_elderly=False):
-    print("🚀 Generating itinerary...")
-    total_start = time.time()
-
-    # Handle backward compatibility - convert single age to list
-    if kids_age is not None and not isinstance(kids_age, list):
-        kids_age = [kids_age]
-    
-    # Build modifier string for search query
-    modifier = ""
-    if with_kids and kids_age:
-        avg_age = sum(kids_age) / len(kids_age)
-        modifier = f" with {int(avg_age)}-year-old kid"
-    elif with_kids:
-        modifier = " with kids"
-        
-    destination_normalized = normalize_destination(destination)
-
-    context = retrieve_relevant_transcripts(
-        f"{destination} things to do{modifier}",
-        destination=destination_normalized,
-        with_kids=with_kids,
-        with_elderly=with_elderly
-    )
-
-    if not context.strip():
-        print("⚠️ No relevant transcripts found. Proceeding without context.")
-        context = ""  # Fallback to LLM-only generation
-
-    min_required = max(4 * travel_days, 12)
-    print(f"📌 Enforcing minimum of {min_required} items")
-
-    # Build traveler notes with age range considerations
-    traveler_notes = []
-    if with_kids and kids_age:
-        min_age = min(kids_age)
-        max_age = max(kids_age)
-        
-        if min_age < 6:
-            traveler_notes.append("Include toddler-friendly attractions with minimal walking.")
-        if any(age >= 3 and age <= 12 for age in kids_age):
-            traveler_notes.append("Prioritize interactive museums, theme parks, and hands-on activities.")
-        if max_age > 10:
-            traveler_notes.append("Include more adventurous activities suitable for pre-teens.")
-            
-        if len(kids_age) == 1:
-            traveler_notes.append(f"Prioritize activities suitable for {kids_age[0]}-year-old children.")
-        else:
-            ages_str = ", ".join(str(age) for age in kids_age)
-            traveler_notes.append(f"Prioritize activities suitable for children aged {ages_str}.")
-    elif with_kids:
-        traveler_notes.append("Prioritize child-friendly landmarks and activities.")
-    elif with_elderly:
-        traveler_notes.append("Include comfortable, low-exertion activities.")
-    traveler_notes = " ".join(traveler_notes)
-
-    chain: RunnableSequence = prompt_template | llm | retry_parser
-    llm_start = time.time()
-
-    result = chain.invoke({
-        "destination": destination,
-        "travel_days": travel_days,
-        "min_count": min_required,
-        "retrieved_context": context,
-        "traveler_notes": traveler_notes
-    })
-
-    print(f"💬 LLM response in {time.time() - llm_start:.2f}s")
-
     try:
-        actual_count = len(result.Suggested_Things_to_Do)
-        if actual_count < min_required:
-            return {"error": f"Only {actual_count} valid items after filtering."}
-        print(f"✅ Success in {time.time() - total_start:.2f}s")
-        return result.model_dump()
+        print("🚀 Generating itinerary...")
+        total_start = time.time()
+
+        # Handle backward compatibility - convert single age to list
+        if kids_age is not None and not isinstance(kids_age, list):
+            kids_age = [kids_age]
+        
+        # Build modifier string for search query
+        modifier = ""
+        if with_kids and kids_age:
+            avg_age = sum(kids_age) / len(kids_age)
+            modifier = f" with {int(avg_age)}-year-old kid"
+        elif with_kids:
+            modifier = " with kids"
+            
+        destination_normalized = normalize_destination(destination)
+        print(f"🌍 Normalized destination: {destination_normalized}")
+
+        try:
+            context = retrieve_relevant_transcripts(
+                f"{destination} things to do{modifier}",
+                destination=destination_normalized,
+                with_kids=with_kids,
+                with_elderly=with_elderly
+            )
+        except Exception as e:
+            print(f"⚠️ Error retrieving transcripts: {str(e)}")
+            context = ""  # Fallback to LLM-only generation
+
+        if not context.strip():
+            print("⚠️ No relevant transcripts found. Proceeding without context.")
+            context = ""
+
+        min_required = max(4 * travel_days, 12)
+        print(f"📌 Enforcing minimum of {min_required} items")
+
+        # Build traveler notes with age range considerations
+        traveler_notes = []
+        if with_kids and kids_age:
+            min_age = min(kids_age)
+            max_age = max(kids_age)
+            
+            if min_age < 6:
+                traveler_notes.append("Include toddler-friendly attractions with minimal walking.")
+            if any(age >= 3 and age <= 12 for age in kids_age):
+                traveler_notes.append("Prioritize interactive museums, theme parks, and hands-on activities.")
+            if max_age > 10:
+                traveler_notes.append("Include more adventurous activities suitable for pre-teens.")
+                
+            if len(kids_age) == 1:
+                traveler_notes.append(f"Prioritize activities suitable for {kids_age[0]}-year-old children.")
+            else:
+                ages_str = ", ".join(str(age) for age in kids_age)
+                traveler_notes.append(f"Prioritize activities suitable for children aged {ages_str}.")
+        elif with_kids:
+            traveler_notes.append("Prioritize child-friendly landmarks and activities.")
+        elif with_elderly:
+            traveler_notes.append("Include comfortable, low-exertion activities.")
+        traveler_notes = " ".join(traveler_notes)
+
+        print("🤖 Calling LLM for recommendations...")
+        chain: RunnableSequence = prompt_template | llm | retry_parser
+        llm_start = time.time()
+
+        try:
+            result = chain.invoke({
+                "destination": destination,
+                "travel_days": travel_days,
+                "min_count": min_required,
+                "retrieved_context": context,
+                "traveler_notes": traveler_notes
+            })
+            print(f"💬 LLM response in {time.time() - llm_start:.2f}s")
+        except Exception as e:
+            print(f"❌ Error from LLM chain: {str(e)}")
+            raise
+
+        try:
+            actual_count = len(result.Suggested_Things_to_Do)
+            if actual_count < min_required:
+                return {"error": f"Only {actual_count} valid items after filtering."}
+            print(f"✅ Success in {time.time() - total_start:.2f}s")
+            return result.model_dump()
+        except Exception as e:
+            print(f"❌ Error validating result: {str(e)}")
+            raise
+
     except Exception as e:
-        return {"error": f"Failed to validate result: {str(e)}"}
+        error_msg = f"Failed to generate itinerary: {str(e)}"
+        print(f"❌ {error_msg}")
+        return {"error": error_msg}
 
 
