@@ -6,6 +6,7 @@ from functools import lru_cache
 from dotenv import load_dotenv
 from pydantic import BaseModel
 import re
+from datetime import datetime
 
 from openai import OpenAI
 from pinecone import Pinecone
@@ -19,12 +20,14 @@ from langchain_core.runnables import RunnableSequence
 load_dotenv()
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 PINECONE_API_KEY = os.getenv("PINECONE_API_KEY")
-INDEX_NAME = "plan-your-trip"
+INDEX_NAME = os.getenv("INDEX_NAME")
 
 if not OPENAI_API_KEY:
     raise ValueError("OPENAI_API_KEY environment variable is not set")
 if not PINECONE_API_KEY:
     raise ValueError("PINECONE_API_KEY environment variable is not set")
+if not INDEX_NAME:
+    raise ValueError("INDEX_NAME environment variable is not set")
 
 # --- Clients ---
 try:
@@ -155,6 +158,8 @@ Instructions:
 - EXCLUDE bars, lounges, restaurants, cafes, and food-only destinations.
 - You can include places that offer food only if it's part of a larger family or cultural experience (e.g., a fair or theme park).
 - List specific museums if possible, rather than umbrella terms like "Smithsonian Museums"
+- Consider any seasonal events or weather-related factors mentioned in the traveler notes
+- Pay attention to any special requests or preferences in the traveler notes
 
 Examples of GOOD entries for Dallas TX if with kids aged 3:
 - "Peppa Pig Theme Park": An recently opened toddler park themed around Peppa Pig.
@@ -192,7 +197,16 @@ Context:
 )
 
 # --- Main Function ---
-def generate_structured_itinerary(destination: str, travel_days: int, with_kids=False, kids_age=None, with_elderly=False):
+def generate_structured_itinerary(
+    destination: str,
+    travel_days: int,
+    with_kids=False,
+    kids_age=None,
+    with_elderly=False,
+    special_requests=None,
+    start_date=None,
+    end_date=None
+):
     try:
         print("🚀 Generating itinerary...")
         total_start = time.time()
@@ -202,12 +216,20 @@ def generate_structured_itinerary(destination: str, travel_days: int, with_kids=
             kids_age = [kids_age]
         
         # Build modifier string for search query
-        modifier = ""
+        modifiers = []
         if with_kids and kids_age:
             avg_age = sum(kids_age) / len(kids_age)
-            modifier = f" with {int(avg_age)}-year-old kid"
+            modifiers.append(f"with {int(avg_age)}-year-old kid")
         elif with_kids:
-            modifier = " with kids"
+            modifiers.append("with kids")
+        
+        if with_elderly:
+            modifiers.append("elderly-friendly")
+            
+        if special_requests:
+            modifiers.append(special_requests)
+            
+        modifier = " " + " and ".join(modifiers) if modifiers else ""
             
         destination_normalized = normalize_destination(destination)
         print(f"🌍 Normalized destination: {destination_normalized}")
@@ -232,6 +254,28 @@ def generate_structured_itinerary(destination: str, travel_days: int, with_kids=
 
         # Build traveler notes with age range considerations
         traveler_notes = []
+        
+        # Add date-specific notes if provided
+        if start_date and end_date:
+            traveler_notes.append(f"Trip dates: {start_date} to {end_date}.")
+            
+            # Parse dates to check for seasonal considerations
+            start = datetime.strptime(start_date, '%Y-%m-%d')
+            month = start.month
+            
+            # Add seasonal notes
+            if month in [12, 1, 2]:  # Winter
+                traveler_notes.append("Consider indoor activities and winter events.")
+            elif month in [3, 4, 5]:  # Spring
+                traveler_notes.append("Include spring festivals and outdoor activities.")
+            elif month in [6, 7, 8]:  # Summer
+                traveler_notes.append("Prioritize early morning or indoor activities to avoid peak heat.")
+            else:  # Fall
+                traveler_notes.append("Consider fall festivals and outdoor activities.")
+        
+        if special_requests:
+            traveler_notes.append(f"Special requests: {special_requests}")
+            
         if with_kids and kids_age:
             min_age = min(kids_age)
             max_age = max(kids_age)
@@ -250,8 +294,10 @@ def generate_structured_itinerary(destination: str, travel_days: int, with_kids=
                 traveler_notes.append(f"Prioritize activities suitable for children aged {ages_str}.")
         elif with_kids:
             traveler_notes.append("Prioritize child-friendly landmarks and activities.")
-        elif with_elderly:
+            
+        if with_elderly:
             traveler_notes.append("Include comfortable, low-exertion activities.")
+            
         traveler_notes = " ".join(traveler_notes)
 
         print("🤖 Calling LLM for recommendations...")

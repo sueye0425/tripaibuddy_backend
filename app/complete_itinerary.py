@@ -8,7 +8,11 @@ from langchain.output_parsers import PydanticOutputParser, OutputFixingParser
 from .schema import DayItinerary
 load_dotenv()
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-llm = ChatOpenAI(openai_api_key=OPENAI_API_KEY, model_name="gpt-4-turbo", temperature=0.5)
+llm = ChatOpenAI(
+    api_key=OPENAI_API_KEY,
+    model_name="gpt-4-turbo",
+    temperature=0.5
+)
 parser = PydanticOutputParser(pydantic_object=DayItinerary)
 fallback_parser = OutputFixingParser.from_llm(llm=llm, parser=parser)
 # === Prompt Template ===

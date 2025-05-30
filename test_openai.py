@@ -8,12 +8,20 @@ load_dotenv()
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
 if not OPENAI_API_KEY:
-    print("❌ OPENAI_API_KEY not found in environment")
-    exit(1)
+    raise ValueError("OPENAI_API_KEY environment variable is not set")
 
 try:
+    import openai
+    version = tuple(map(int, openai.__version__.split('.')))
+    if version < (1, 12, 0):
+        print(f"❌ OpenAI version {openai.__version__} is too old. Please run: pip install --upgrade openai")
+        exit(1)
     print("🔄 Connecting to OpenAI...")
-    client = OpenAI(api_key=OPENAI_API_KEY)
+    client = OpenAI(
+        api_key=OPENAI_API_KEY,
+        timeout=30.0,
+        max_retries=2
+    )
     
     print("📊 Testing embeddings API...")
     start_time = time.time()
@@ -25,15 +33,17 @@ try:
     
     print("💬 Testing chat completion API...")
     start_time = time.time()
-    completion = client.chat.completions.create(
-        model="gpt-4-turbo-preview",
-        messages=[{"role": "user", "content": "Say hello!"}]
+    response = client.chat.completions.create(
+        model="gpt-3.5-turbo",
+        messages=[{"role": "user", "content": "Say hello!"}],
+        max_tokens=10
     )
     print(f"✅ Chat completion received in {time.time() - start_time:.2f}s")
-    print(f"Response: {completion.choices[0].message.content}")
+    print(f"Response: {response.choices[0].message.content}")
     
     print("✅ OpenAI connection test successful!")
     
 except Exception as e:
     print(f"❌ Error: {str(e)}")
-    exit(1) 
+    print("If you see a 'proxies' error, try: pip install --upgrade openai")
+    raise 
