@@ -1,0 +1,59 @@
+{
+  "details": {
+    "destination": "Orlando, FL",
+    "travelDays": 3,
+    "startDate": "2025-06-03",
+    "endDate": "2025-06-05",
+    "withKids": true,
+    "withElders": false,
+    "kidsAge": [
+      2
+    ],
+    "specialRequests": ""
+  },
+  "wishlist": [],
+  "itinerary": [
+    {
+      "day": 1,
+      "attractions": [
+        {
+          "name": "Universal Islands of Adventure",
+          "description": "6000 Universal Blvd, Orlando, FL 32819, USA",
+          "location": {
+            "lat": 28.4716879,
+            "lng": -81.4701971
+          },
+          "type": "landmark"
+        }
+      ]
+    },
+    {
+      "day": 2,
+      "attractions": [
+        {
+          "name": "Universal Studios Florida",
+          "description": "6000 Universal Blvd, Orlando, FL 32819, USA",
+          "location": {
+            "lat": 28.4793754,
+            "lng": -81.4685422
+          },
+          "type": "landmark"
+        }
+      ]
+    },
+    {
+      "day": 3,
+      "attractions": [
+        {
+          "name": "SEA LIFE Orlando Aquarium",
+          "description": "8449 International Dr, Orlando, FL 32819, USA",
+          "location": {
+            "lat": 28.4425885,
+            "lng": -81.46856799999999
+          },
+          "type": "landmark"
+        }
+      ]
+    }
+  ]
+}

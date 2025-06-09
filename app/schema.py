@@ -1,26 +1,66 @@
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Any
 from pydantic import BaseModel, RootModel
 
-class LandmarkSelection(BaseModel):
+class TripDetails(BaseModel):
     destination: str
-    travel_days: int
-    with_kids: bool = False
-    with_elderly: bool = False
-    selected_landmarks: List[str]
+    travelDays: int
+    startDate: str
+    endDate: str
+    withKids: bool = False
+    withElders: bool = False
+    kidsAge: Optional[List[int]] = None
+    specialRequests: Optional[str] = None
 
-class ItineraryBlock(BaseModel):
-    type: str  # "landmark" or "meal"
+class Location(BaseModel):
+    lat: float
+    lng: float
+
+class Attraction(BaseModel):
     name: str
     description: str
-    mealtime: str | None = None  # Only filled if it's a meal
+    location: Location
+    type: str  # "restaurant" or "landmark"
 
+class DayAttraction(BaseModel):
+    day: int
+    attractions: List[Attraction]
+
+class LandmarkSelection(BaseModel):
+    details: TripDetails
+    wishlist: List[Any] = []  # Currently empty but keeping for future use
+    itinerary: List[DayAttraction]
+
+# New structured itinerary output models
+class ItineraryBlock(BaseModel):
+    type: str  # "landmark" or "restaurant"
+    name: str
+    description: str
+    start_time: str  # e.g., "9:00 AM"
+    duration: str  # e.g., "2 hours"
+    mealtime: Optional[str] = None  # "lunch" or "dinner" - only for restaurants
+    place_id: Optional[str] = None  # Google Places ID if available
+    rating: Optional[float] = None  # Google Places rating if available
+    location: Optional[Location] = None  # Coordinates for internal use
+    address: Optional[str] = None  # Human-readable address for display
+    photo_url: Optional[str] = None  # Proxy URL for photo if available
+    notes: Optional[str] = None  # Additional context or recommendations
+
+class StructuredDayPlan(BaseModel):
+    day: int
+    blocks: List[ItineraryBlock]
+
+class StructuredItinerary(BaseModel):
+    itinerary: List[StructuredDayPlan]
+
+# Keep the old models for backward compatibility
 class DayPlan(BaseModel):
     morning: Optional[str] = None
     afternoon: Optional[str] = None
     evening: Optional[str] = None
     notes: Optional[str] = None
 
-class DayItinerary(BaseModel):
-    root: Dict[str, DayPlan]
+class DayItinerary(RootModel[Dict[str, Any]]):
+    """Root model for day itinerary that can handle flexible day structures"""
+    pass
 
 

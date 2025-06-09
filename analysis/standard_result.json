@@ -1,0 +1,274 @@
+{
+  "itinerary": [
+    {
+      "day": 1,
+      "blocks": [
+        {
+          "type": "restaurant",
+          "name": "Toothsome Chocolate Emporium",
+          "description": "A full-service restaurant with an extensive menu and an all-day brunch featuring unique sweets and meals.",
+          "start_time": "08:00",
+          "duration": "1h",
+          "mealtime": "breakfast",
+          "place_id": null,
+          "rating": null,
+          "location": {
+            "lat": 28.5383,
+            "lng": -81.3792
+          },
+          "address": null,
+          "photo_url": null,
+          "notes": null
+        },
+        {
+          "type": "landmark",
+          "name": "Universal Islands of Adventure",
+          "description": "A theme park with uniquely themed islands, each offering its own adventure.",
+          "start_time": "09:30",
+          "duration": "6h",
+          "mealtime": null,
+          "place_id": null,
+          "rating": null,
+          "location": {
+            "lat": 28.5383,
+            "lng": -81.3792
+          },
+          "address": null,
+          "photo_url": null,
+          "notes": null
+        },
+        {
+          "type": "restaurant",
+          "name": "Mythos Restaurant",
+          "description": "Award-winning restaurant located inside Universal's Islands of Adventure, known for its contemporary cuisine.",
+          "start_time": "16:00",
+          "duration": "1h",
+          "mealtime": "lunch",
+          "place_id": null,
+          "rating": null,
+          "location": {
+            "lat": 28.5383,
+            "lng": -81.3792
+          },
+          "address": null,
+          "photo_url": null,
+          "notes": null
+        },
+        {
+          "type": "landmark",
+          "name": "Scenic Viewpoint",
+          "description": "A beautiful spot offering panoramic views of the park and surrounding areas.",
+          "start_time": "17:30",
+          "duration": "45min",
+          "mealtime": null,
+          "place_id": null,
+          "rating": null,
+          "location": {
+            "lat": 28.5383,
+            "lng": -81.3792
+          },
+          "address": null,
+          "photo_url": null,
+          "notes": null
+        },
+        {
+          "type": "restaurant",
+          "name": "Hard Rock Cafe Orlando",
+          "description": "Iconic rock 'n' roll-themed chain with a high-energy vibe serving burgers and American classics.",
+          "start_time": "19:35",
+          "duration": "1h",
+          "mealtime": "dinner",
+          "place_id": null,
+          "rating": null,
+          "location": {
+            "lat": 28.5383,
+            "lng": -81.3792
+          },
+          "address": null,
+          "photo_url": null,
+          "notes": null
+        }
+      ]
+    },
+    {
+      "day": 2,
+      "blocks": [
+        {
+          "type": "restaurant",
+          "name": "Today Cafe",
+          "description": "Inspired by NBC's long-running morning show, this cafe serves up freshly prepared pastries, salads, sandwiches, and coffee.",
+          "start_time": "08:00",
+          "duration": "1h",
+          "mealtime": "breakfast",
+          "place_id": null,
+          "rating": null,
+          "location": {
+            "lat": 28.5383,
+            "lng": -81.3792
+          },
+          "address": null,
+          "photo_url": null,
+          "notes": null
+        },
+        {
+          "type": "landmark",
+          "name": "Universal Studios Florida",
+          "description": "A film and TV based theme park offering attractions and entertainment that put guests right in the middle of the action.",
+          "start_time": "09:30",
+          "duration": "6h",
+          "mealtime": null,
+          "place_id": null,
+          "rating": null,
+          "location": {
+            "lat": 28.5383,
+            "lng": -81.3792
+          },
+          "address": null,
+          "photo_url": null,
+          "notes": null
+        },
+        {
+          "type": "restaurant",
+          "name": "Finnegan's Bar & Grill",
+          "description": "Irish-American pub at Universal Studios Florida serving hearty fare and lively entertainment.",
+          "start_time": "16:00",
+          "duration": "1h",
+          "mealtime": "lunch",
+          "place_id": null,
+          "rating": null,
+          "location": {
+            "lat": 28.5383,
+            "lng": -81.3792
+          },
+          "address": null,
+          "photo_url": null,
+          "notes": null
+        },
+        {
+          "type": "landmark",
+          "name": "Local Market",
+          "description": "A nearby market where visitors can explore local crafts, foods, and souvenirs.",
+          "start_time": "17:30",
+          "duration": "1h",
+          "mealtime": null,
+          "place_id": null,
+          "rating": null,
+          "location": {
+            "lat": 28.5383,
+            "lng": -81.3792
+          },
+          "address": null,
+          "photo_url": null,
+          "notes": null
+        },
+        {
+          "type": "restaurant",
+          "name": "VIVO Italian Kitchen",
+          "description": "A modern Italian restaurant known for its pasta bar where classic dishes are crafted in an open kitchen.",
+          "start_time": "18:45",
+          "duration": "1h",
+          "mealtime": "dinner",
+          "place_id": null,
+          "rating": null,
+          "location": {
+            "lat": 28.5383,
+            "lng": -81.3792
+          },
+          "address": null,
+          "photo_url": null,
+          "notes": null
+        }
+      ]
+    },
+    {
+      "day": 3,
+      "blocks": [
+        {
+          "type": "restaurant",
+          "name": "Denny's",
+          "description": "A classic American diner chain serving breakfast, lunch, and dinner around the clock.",
+          "start_time": "08:00",
+          "duration": "1h",
+          "mealtime": "breakfast",
+          "place_id": null,
+          "rating": null,
+          "location": {
+            "lat": 28.5383,
+            "lng": -81.3792
+          },
+          "address": null,
+          "photo_url": null,
+          "notes": null
+        },
+        {
+          "type": "landmark",
+          "name": "SEA LIFE Orlando Aquarium",
+          "description": "An interactive aquarium featuring a variety of sea creatures, touch pools, and underwater tunnels.",
+          "start_time": "09:30",
+          "duration": "2h",
+          "mealtime": null,
+          "place_id": null,
+          "rating": null,
+          "location": {
+            "lat": 28.5383,
+            "lng": -81.3792
+          },
+          "address": null,
+          "photo_url": null,
+          "notes": null
+        },
+        {
+          "type": "restaurant",
+          "name": "Sharks Underwater Grill",
+          "description": "Unique dining experience where guests enjoy gourmet meals while observing sharks swimming around them.",
+          "start_time": "12:00",
+          "duration": "1h",
+          "mealtime": "lunch",
+          "place_id": null,
+          "rating": null,
+          "location": {
+            "lat": 28.5383,
+            "lng": -81.3792
+          },
+          "address": null,
+          "photo_url": null,
+          "notes": null
+        },
+        {
+          "type": "landmark",
+          "name": "ICON Park",
+          "description": "An entertainment complex with a 400-foot observation wheel, offering stunning views of Orlando.",
+          "start_time": "13:45",
+          "duration": "2h",
+          "mealtime": null,
+          "place_id": null,
+          "rating": null,
+          "location": {
+            "lat": 28.5383,
+            "lng": -81.3792
+          },
+          "address": null,
+          "photo_url": null,
+          "notes": null
+        },
+        {
+          "type": "restaurant",
+          "name": "Yard House",
+          "description": "High-end sports-bar chain with a huge menu of New American fare & an extensive list of draft beers.",
+          "start_time": "16:15",
+          "duration": "1h",
+          "mealtime": "dinner",
+          "place_id": null,
+          "rating": null,
+          "location": {
+            "lat": 28.5383,
+            "lng": -81.3792
+          },
+          "address": null,
+          "photo_url": null,
+          "notes": null
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,240 @@
+{
+  "itinerary": [
+    {
+      "day": 1,
+      "blocks": [
+        {
+          "type": "restaurant",
+          "name": "Keke's Breakfast Cafe",
+          "description": "Cozy breakfast spot with a variety of dishes",
+          "start_time": "08:00",
+          "duration": "1.5h",
+          "mealtime": "breakfast",
+          "place_id": null,
+          "rating": null,
+          "location": {
+            "lat": 28.4811,
+            "lng": -81.4701
+          },
+          "address": "7512 Dr Phillips Blvd, Orlando, FL 32819",
+          "photo_url": "https://example.com/kekes_breakfast_cafe.jpg",
+          "notes": "Try their signature pancakes"
+        },
+        {
+          "type": "landmark",
+          "name": "Universal Islands of Adventure",
+          "description": "Popular landmark in Orlando, FL",
+          "start_time": "09:35",
+          "duration": "8h",
+          "mealtime": null,
+          "place_id": null,
+          "rating": null,
+          "location": {
+            "lat": 28.4811,
+            "lng": -81.4701
+          },
+          "address": null,
+          "photo_url": null,
+          "notes": null
+        },
+        {
+          "type": "restaurant",
+          "name": "The Cowfish Sushi Burger Bar",
+          "description": "Unique fusion restaurant with sushi and burgers",
+          "start_time": "17:45",
+          "duration": "1.5h",
+          "mealtime": "lunch",
+          "place_id": null,
+          "rating": null,
+          "location": {
+            "lat": 28.4747,
+            "lng": -81.4678
+          },
+          "address": "6000 Universal Blvd, Orlando, FL 32819",
+          "photo_url": "https://example.com/the_cowfish.jpg",
+          "notes": "Don't miss the burgushi"
+        },
+        {
+          "type": "restaurant",
+          "name": "Toothsome Chocolate Emporium & Savory Feast Kitchen",
+          "description": "Steampunk-themed eatery with decadent desserts",
+          "start_time": "19:20",
+          "duration": "1.5h",
+          "mealtime": "dinner",
+          "place_id": null,
+          "rating": null,
+          "location": {
+            "lat": 28.4724,
+            "lng": -81.4679
+          },
+          "address": "6000 Universal Blvd, Orlando, FL 32819",
+          "photo_url": "https://example.com/toothsome_chocolate_emporium.jpg",
+          "notes": "Save room for dessert!"
+        }
+      ]
+    },
+    {
+      "day": 2,
+      "blocks": [
+        {
+          "type": "restaurant",
+          "name": "First Watch",
+          "description": "A popular chain for breakfast and brunch, serving health-minded American eats.",
+          "start_time": "08:00",
+          "duration": "1 hour",
+          "mealtime": "breakfast",
+          "place_id": null,
+          "rating": 4.5,
+          "location": {
+            "lat": 28.5383,
+            "lng": -81.3792
+          },
+          "address": "7500 W Sand Lake Rd, Orlando, FL 32819",
+          "photo_url": null,
+          "notes": null
+        },
+        {
+          "type": "landmark",
+          "name": "Universal Studios Florida",
+          "description": "A theme park and production studio featuring movie-themed rides and attractions, ideal for families and film enthusiasts.",
+          "start_time": "10:05",
+          "duration": "6 hours",
+          "mealtime": null,
+          "place_id": null,
+          "rating": 4.7,
+          "location": {
+            "lat": 28.5383,
+            "lng": -81.3792
+          },
+          "address": "6000 Universal Blvd, Orlando, FL 32819",
+          "photo_url": null,
+          "notes": "This is a full-day activity."
+        },
+        {
+          "type": "restaurant",
+          "name": "Border Grill Fresh-Mex",
+          "description": "A vibrant spot offering a variety of fresh Mexican dishes in a casual setting.",
+          "start_time": "12:10",
+          "duration": "1 hour",
+          "mealtime": "lunch",
+          "place_id": null,
+          "rating": 4.4,
+          "location": {
+            "lat": 28.5383,
+            "lng": -81.3792
+          },
+          "address": "5695 Vineland Rd, Orlando, FL 32819",
+          "photo_url": null,
+          "notes": null
+        },
+        {
+          "type": "restaurant",
+          "name": "Cafe Tu Tu Tango",
+          "description": "A lively, artsy spot known for its tapas-style small plates, live entertainment, and colorful decor.",
+          "start_time": "14:15",
+          "duration": "1 hour",
+          "mealtime": "dinner",
+          "place_id": null,
+          "rating": 4.6,
+          "location": {
+            "lat": 28.5383,
+            "lng": -81.3792
+          },
+          "address": "8625 International Dr, Orlando, FL 32819",
+          "photo_url": null,
+          "notes": null
+        }
+      ]
+    },
+    {
+      "day": 3,
+      "blocks": [
+        {
+          "type": "restaurant",
+          "name": "The French Cafe",
+          "description": "A charming spot offering a delightful breakfast with a French twist, perfect for starting the day with family.",
+          "start_time": "08:00",
+          "duration": "1 hour",
+          "mealtime": "breakfast",
+          "place_id": null,
+          "rating": 4.5,
+          "location": {
+            "lat": 28.5383,
+            "lng": -81.3792
+          },
+          "address": "123 French St, Orlando, FL",
+          "photo_url": null,
+          "notes": null
+        },
+        {
+          "type": "landmark",
+          "name": "SEA LIFE Orlando Aquarium",
+          "description": "Explore an underwater world filled with a variety of sea creatures, ideal for a family-friendly adventure.",
+          "start_time": "10:05",
+          "duration": "2 hours",
+          "mealtime": null,
+          "place_id": null,
+          "rating": 4.5,
+          "location": {
+            "lat": 28.5383,
+            "lng": -81.3792
+          },
+          "address": "8449 International Dr, Orlando, FL 32819",
+          "photo_url": null,
+          "notes": null
+        },
+        {
+          "type": "restaurant",
+          "name": "Picnic Park Deli",
+          "description": "Enjoy a casual lunch at this local deli, offering a selection of sandwiches and salads in a relaxed setting.",
+          "start_time": "12:10",
+          "duration": "1 hour",
+          "mealtime": "lunch",
+          "place_id": null,
+          "rating": 4.3,
+          "location": {
+            "lat": 28.5383,
+            "lng": -81.3792
+          },
+          "address": "400 Park Ave, Orlando, FL",
+          "photo_url": null,
+          "notes": null
+        },
+        {
+          "type": "landmark",
+          "name": "Orlando Science Center",
+          "description": "Engage with interactive exhibits and educational programs that make science fun and accessible for all ages.",
+          "start_time": "14:15",
+          "duration": "3 hours",
+          "mealtime": null,
+          "place_id": null,
+          "rating": 4.6,
+          "location": {
+            "lat": 28.5383,
+            "lng": -81.3792
+          },
+          "address": "777 E Princeton St, Orlando, FL 32803",
+          "photo_url": null,
+          "notes": null
+        },
+        {
+          "type": "restaurant",
+          "name": "Bella Italia Ristorante",
+          "description": "Conclude your day with a delightful dinner at this authentic Italian restaurant, known for its cozy ambiance and excellent cuisine.",
+          "start_time": "16:20",
+          "duration": "2 hours",
+          "mealtime": "dinner",
+          "place_id": null,
+          "rating": 4.7,
+          "location": {
+            "lat": 28.5383,
+            "lng": -81.3792
+          },
+          "address": "4669 Millenia Plaza Way, Orlando, FL",
+          "photo_url": null,
+          "notes": null
+        }
+      ]
+    }
+  ]
+}

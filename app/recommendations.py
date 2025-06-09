@@ -160,6 +160,7 @@ class RecommendationGenerator:
             # 4. Refined search for landmarks and restaurants
             # Base landmark types configuration
             base_landmark_configs = [
+                {'type': 'tourist_attraction', 'keywords': ['theme park', 'amusement park', 'disney', 'universal']},
                 {'type': 'museum', 'keywords': ['art', 'history', 'science', 'national']},
                 {'type': 'tourist_attraction', 'keywords': ['monument', 'memorial', 'historic site', 'national mall', 'famous']},
                 {'type': 'park', 'keywords': ['national park', 'state park', 'botanical garden', 'garden', 'famous park']},
@@ -168,24 +169,18 @@ class RecommendationGenerator:
             ]
 
             # Destination-specific adjustments (simple heuristic)
-            # This can be expanded significantly for more nuanced destination typing
             landmark_types_config = list(base_landmark_configs) # Start with a copy
 
-            destination_lower = destination.lower()
-            if "orlando" in destination_lower or "anaheim" in destination_lower: # Cities known for theme parks
-                # Prioritize amusement parks
-                landmark_types_config.insert(0, {'type': 'amusement_park', 'keywords': ['theme park', 'famous']})
-                landmark_types_config.append({'type': 'water_park', 'keywords': []})
-            elif special_requests and "farm" in special_requests.lower() and with_kids: # If user mentions farm
+            # Remove hardcoded city logic - let Google Places API handle relevance
+            if special_requests and "farm" in special_requests.lower() and with_kids: # If user mentions farm
                 landmark_types_config.append({'type': 'tourist_attraction', 'keywords': ['farm', 'petting zoo']})
             
             # Adjust types based on company (kids/elderly)
             if with_kids:
-                if not any(c['type'] == 'amusement_park' for c in landmark_types_config):
-                    landmark_types_config.append({'type': 'amusement_park', 'keywords': []})
+                # Kids get additional family-friendly searches, but theme parks are already in base config
                 if not any(c['type'] == 'zoo' for c in landmark_types_config):
                     landmark_types_config.append({'type': 'zoo', 'keywords': []})
-                landmark_types_config.append({'type': 'playground', 'keywords': []}) # From your previous change
+                landmark_types_config.append({'type': 'playground', 'keywords': []})
             else:
                 if not any(c['type'] == 'art_gallery' for c in landmark_types_config):
                     landmark_types_config.append({'type': 'art_gallery', 'keywords': []})

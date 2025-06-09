@@ -1,0 +1,128 @@
+{
+  "itinerary": [
+    {
+      "day": 1,
+      "blocks": [
+        {
+          "type": "restaurant",
+          "name": "Legacy Cafe Orlando",
+          "description": "Restaurant",
+          "start_time": "08:00",
+          "duration": "45m",
+          "mealtime": "breakfast",
+          "place_id": "ChIJx5sD_FR754gRW0_zuLWaS8A",
+          "rating": 4.7,
+          "location": {
+            "lat": 28.5342817,
+            "lng": -81.40576709999999
+          },
+          "address": "710 S Tampa Ave, Orlando, FL 32805, USA",
+          "photo_url": "/photo-proxy/AXQCQNSmH256pTdKEw3Huj5Ql00YfX62rwg-V-O7EQPHZe6zJyfZaiuulvWEmzCdAsRwSx-mAO6mLIRe1dr6E7KyFOisnetv_5YptefvRcjuTSsqTVSMNJTvwW5JlBiMju4GqngJKChvKTk3H6RstbAxWmNsAA1BHsiI3FbkCmpR-V9A-xLMBUU__8bBPukhVh-KTjZPZZRy2CY6VjCI3wiwtNXevGXDoxuvVixwkVQTANNqitMwz2UQwbdJ_UykIEaIwFf1516l3kFI9gZMRWJ0UoCU0Ck6j3ysHhqZyBOciKPgvl1cv5KbNF8et2eOiHunXxXvqxI1TvE?maxwidth=400&maxheight=400",
+          "notes": null
+        },
+        {
+          "type": "landmark",
+          "name": "Universal Studios Florida",
+          "description": "Famous movie-themed attractions and rides",
+          "start_time": "09:00",
+          "duration": "3h",
+          "mealtime": null,
+          "place_id": null,
+          "rating": null,
+          "location": {
+            "lat": 28.5383,
+            "lng": -81.3792
+          },
+          "address": null,
+          "photo_url": null,
+          "notes": null
+        },
+        {
+          "type": "landmark",
+          "name": "Orlando Science Center",
+          "description": "Explore science exhibits including dinosaur skeletons and interactive learning experiences.",
+          "start_time": "12:30",
+          "duration": "2h",
+          "mealtime": null,
+          "place_id": "ChIJo2bql5B654gR_ITN9PGhBbU",
+          "rating": 4.6,
+          "location": {
+            "lat": 28.5722626,
+            "lng": -81.3682645
+          },
+          "address": "777 E Princeton St, Orlando, FL 32803, USA",
+          "photo_url": "/photo-proxy/AXQCQNT2xjtcyMt0kz8CYYk9ifUz3VBPBWkd43AFONR04vUx8jB-XX9GTrw9BV85Ah0dZCBYEeCawQOLn5s-uDPTJ_WzDXLwwhFAZsb2VxjvchJVLzwMBiHyn7L0yl7xZscvEbnDYTlA0gcaidSe9Ep-CbRwZelBr4_gjWz6NnFruexwu0O2WpHmHpAklR9ECF5NWgwUG7Swv4qq9dCLXhCTTTOcJ694R2p54ElNCS82GqMrEsqqNjuD7UxU4By8Y6_y6T1iiMdRevqTTO5bqmLCtL1FTCJeq2ZzXshf-vkX3_My6A75-jo9BFBJ8ssGvazDhhSjTxEE2Rj_FCxB6NzWtFRHL9J3LdbVXBxos6VsjI0H2jxxPmW6ZA-m5taK7dmzp6bFlLx65rWeOmJKY1R4Mu1PqzPRJJ3zU0qeb61j6ziRZPWwbviKbL_FVdhlWiSaC1dYSERP6WcIKLp212alDeTRkpXRb44--xrQqyHOMt7Nys0t3kyjz-oLO8KgWvJeSiZzG-bnyrzOjz3nJqcRnJXTQVMornBkvqxXFLwAy4KsAe287a89qv4XpjlBTxDYW719Pe4imGAxvkGs2tLBG8_U8kkq674OvQcCMYXHkPRB2I3zNFgwbvshRj1PavraR29ziJGx?maxwidth=400&maxheight=400",
+          "notes": null
+        },
+        {
+          "type": "restaurant",
+          "name": "Eat Good",
+          "description": "Restaurant - Can dine inside theme park or exit/re-enter",
+          "start_time": "12:30",
+          "duration": "1h",
+          "mealtime": "lunch",
+          "place_id": "ChIJV-_Pzzh754gRPqeiGvrzXKs",
+          "rating": 4.9,
+          "location": {
+            "lat": 28.5435561,
+            "lng": -81.38888469999999
+          },
+          "address": "646 W Washington St, Orlando, FL 32801, USA",
+          "photo_url": "/photo-proxy/AXQCQNRJpSzJVFqxjBlADyzEoTGXtwzkpH88X6kUnKmjT4vBGvLim-5DIWi8cWJxEFOskYYhSi8woqMTGzX2w5Ym0mMu-zdCIqyTviYUmSmHhRzibAe_gxRH_H8IL-IP8asW5l0eDM67LYlN14FHQ1GYoJR_QRl1RY9HEbFg-r2Sxpf2Y-24DACNK0dsfIroQcJb8SBWscbMexu8jz4Q31eqh3Xw16r_C32MjRp6yCNqA81be1wHxdqSL99D_mda5jZsiSKEqxhZWOZ-Hs9vKUYWHktxx7aguPM1MqUeuwFCfBgv6b6OtvHHJDkdnZMP3aqn2WZsyinb_Fs?maxwidth=400&maxheight=400",
+          "notes": null
+        },
+        {
+          "type": "landmark",
+          "name": "Lake Eola Park",
+          "description": "Iconic park in the heart of Orlando featuring a beautiful lake, swan boats, and a walking path.",
+          "start_time": "15:00",
+          "duration": "1.5h",
+          "mealtime": null,
+          "place_id": "ChIJu3hNU-N654gR0x0I9_3iNvc",
+          "rating": 4.7,
+          "location": {
+            "lat": 28.5427628,
+            "lng": -81.37092919999999
+          },
+          "address": "512 E Washington St, Orlando, FL 32801, USA",
+          "photo_url": "/photo-proxy/AXQCQNTsNU2XVdf79KzXpldxbM1hg5HsQBxnqYTxEM4tZONxeyWCgmBsc6VjXIPL-GAPJd0nfciJGCWRJ2PeEm8ITeRBUOm0S8VDA6qXVK1TJOyaulmDh-mH6rLUPccYrRNr-f_0uBLO7EVrb9iEwyosyQ6wqE3t_ulF4bzP0lYVDDhPaWj7ZpNvoQB1dNAZK0JJgqqETtcxENF4Z8TJ3ZHZglc6A-Chjp_3aYda6SmTLJDU3vbKc8Z0nsdt_vgqwvXgF3lNXrXHOKp3TXtBoyYc-lF_zNBQ4AjE3DyqDYYsl9PvAeVtkfZFzuu2MIkVBRlrXWo3cKhoCYNPgkLn_SmyFyOozfGc-T8UHPH00dCBDvGZVc_PP0c0qL2udbdrY06QE7NKruHUZdkKNGF53DywSvD9gumCiFJap22O0J3605AbwQvAEKrLq6de7pF0Y0EpdFRu5ol_I0MeeMz6VS4KRCAIGjH05b4HTl-uyqN9PPz25zujS4FHAbT2unHQpLJrgqAj63fVvHQ3SUN4iOOwnzCdRBiJNp3ATqsEzqpoPlt3QC8n_5B7XVip6R0sS9Kx5mIT2GgIdraS1GpD8Td7KJtY02MGhpCNSWaxMAhUyL3x2a2a450xFcvL9dLxUrp_LyOHpmgZ?maxwidth=400&maxheight=400",
+          "notes": null
+        },
+        {
+          "type": "landmark",
+          "name": "The Wheel at ICON Park",
+          "description": "Ride this 400-foot tall observation wheel for panoramic views of Orlando.",
+          "start_time": "16:45",
+          "duration": "1h",
+          "mealtime": null,
+          "place_id": null,
+          "rating": null,
+          "location": {
+            "lat": 28.5383,
+            "lng": -81.3792
+          },
+          "address": null,
+          "photo_url": null,
+          "notes": null
+        },
+        {
+          "type": "restaurant",
+          "name": "Foreigner Restaurant",
+          "description": "Restaurant",
+          "start_time": "19:00",
+          "duration": "1.5h",
+          "mealtime": "dinner",
+          "place_id": "ChIJEwM4Ptp754gRZPEFl52rAwY",
+          "rating": 4.9,
+          "location": {
+            "lat": 28.5674823,
+            "lng": -81.3473968
+          },
+          "address": "2816 Corrine Dr, Orlando, FL 32803, USA",
+          "photo_url": "/photo-proxy/AXQCQNTpF1nFxKeTpexIqKbRicVCsmcQT2-9DIWNpkaKVkK7Rb9XVhht3O4QrKJiefqA758j3CNsl76ejkKG5KfAV9qpacMe4Q4o7eFZ3vXTP3nOGvqgsyrdjjj8_JjdxVvNCbjZoe7tnwoW8sgGRQuraCOh7XJc6dqG36vU5xXR8342SA3vZlPBGBg76W-yGEdE1Bm7yeNOevg2TSKztWC9_9DdpZcfeQb3n9DK057e76FS6zbk2UIbVqQIshe4j4P9oD2JnOm1sHtRQBwArMJw_D8DvbnUvGDNlAmEK4vcqqvlGnNp9MTU4QmPtZBZEuArATlcfOi0KnOJrZtYFclsxbQn8QOvwcKaQjZWHdOjaWeiQWWrsSo4DtNKWXzuHmh5qw78sdProfedCvT8k6tOTMLUwjP8LplJTweSxYe2JN1NSbD3EtLzKVn4rpL--YhlPMNGdHB2I6NxpPXCrKZd8N48xQtzjexvZ9aj0rrV9a1H9eZi57o5uWRulYOFLJW7eS9LHm-C3DM7qfEaj58Cdn5M8IgOHGJ7rTX8EuhLbrK09Fg0Vckv4g5Qr480NZNNdhFch2WrG9fAME1nu77r-3_iief9K7Rwl3Ok9R-nO-ft963dKZ3jtfQiwl7hi14lgCQ6D3y-?maxwidth=400&maxheight=400",
+          "notes": null
+        }
+      ]
+    }
+  ]
+}

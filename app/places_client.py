@@ -195,15 +195,32 @@ class GooglePlacesClient:
         if keyword:
             params['keyword'] = keyword
 
+        print(f"\n🌐 DEBUG: Places Nearby API Call")
+        print(f"📍 URL: {url}")
+        print(f"📋 Params: {json.dumps(params, indent=2)}")
+        print(f"🔑 API Key: {self.api_key[:10]}..." if self.api_key else "❌ No API Key")
+        
         try:
-            async with session.get(url, params=params, timeout=5) as response:
+            async with session.get(url, params=params, timeout=10) as response:
+                print(f"📡 Response Status: {response.status}")
                 result = await response.json()
+                print(f"📥 Full API Response: {json.dumps(result, indent=2)}")
+                
                 if result.get('status') == 'OK':
+                    print(f"✅ Places API SUCCESS - found {len(result.get('results', []))} places")
+                    if result.get('results'):
+                        for i, place in enumerate(result['results'][:3]):  # Show first 3 results
+                            print(f"📍 Result {i+1}: {place.get('name')} - {place.get('place_id')}")
                     return result
-                self.logger.error(f"Places API error: {result.get('status')}")
-                return {'results': []}
+                elif result.get('status') == 'ZERO_RESULTS':
+                    print(f"🔍 Places API: No results found for query")
+                    return {'results': []}
+                else:
+                    print(f"❌ Places API ERROR: {result.get('status')}")
+                    print(f"❌ Error message: {result.get('error_message', 'No error message')}")
+                    return {'results': []}
         except Exception as e:
-            self.logger.error(f"Error in places_nearby: {str(e)}")
+            print(f"⚠️ Exception in places_nearby: {str(e)}")
             return {'results': []}
 
     async def place_details(self, place_id: str) -> Optional[Dict]:
@@ -213,18 +230,41 @@ class GooglePlacesClient:
         params = {
             'place_id': place_id,
             'key': self.api_key,
-            'fields': 'name,rating,user_ratings_total,formatted_address,geometry/location,opening_hours,photo,price_level,website,formatted_phone_number,wheelchair_accessible_entrance,types'
+            'fields': 'place_id,name,rating,user_ratings_total,formatted_address,geometry/location,opening_hours,photo,price_level,website,formatted_phone_number,wheelchair_accessible_entrance,types'
         }
 
+        print(f"\n🔍 DEBUG: Place Details API Call")
+        print(f"📍 URL: {url}")
+        print(f"📋 Params: {json.dumps(params, indent=2)}")
+        print(f"🔑 API Key: {self.api_key[:10]}..." if self.api_key else "❌ No API Key")
+        
         try:
-            async with session.get(url, params=params, timeout=5) as response:
+            async with session.get(url, params=params, timeout=10) as response:
+                print(f"📡 Response Status: {response.status}")
                 result = await response.json()
+                print(f"📥 Full API Response: {json.dumps(result, indent=2)}")
+                
                 if result.get('status') == 'OK':
+                    place_name = result['result'].get('name', 'Unknown')
+                    print(f"✅ Place Details SUCCESS for {place_name}")
+                    
+                    # Log key fields
+                    place_data = result['result']
+                    print(f"🏷️  Name: {place_data.get('name')}")
+                    print(f"🔑 Place ID: {place_data.get('place_id')}")
+                    print(f"⭐ Rating: {place_data.get('rating')}")
+                    print(f"📍 Address: {place_data.get('formatted_address')}")
+                    print(f"📸 Photos: {len(place_data.get('photos', []))} photos")
+                    if place_data.get('photos'):
+                        print(f"📸 First photo ref: {place_data['photos'][0].get('photo_reference', 'No ref')}")
+                    
                     return result
-                self.logger.error(f"Place Details API error: {result.get('status')}")
-                return None
+                else:
+                    print(f"❌ Place Details ERROR: {result.get('status')}")
+                    print(f"❌ Error message: {result.get('error_message', 'No error message')}")
+                    return None
         except Exception as e:
-            self.logger.error(f"Error in place_details: {str(e)}")
+            print(f"⚠️ Exception in place_details: {str(e)}")
             return None
 
     async def calculate_radius(self, location: Dict[str, float]) -> int:
@@ -576,6 +616,73 @@ class GooglePlacesClient:
         await self.cache.close()
         await self.routes_client.close() # This will call the new async close in GoogleRoutesClient
         self.logger.info("RedisCache and GoogleRoutesClient connections managed for closure by GooglePlacesClient.")
+
+    async def get_photo_url(self, photo_reference: str, max_width: int = 400, max_height: int = 400) -> Optional[str]:
+        """Get photo URL from Google Places Photo API"""
+        if not photo_reference:
+            return None
+            
+        session = await self.get_session()
+        url = "https://maps.googleapis.com/maps/api/place/photo"
+        params = {
+            'photoreference': photo_reference,
+            'maxwidth': max_width,
+            'maxheight': max_height,
+            'key': self.api_key
+        }
+        
+        try:
+            async with session.get(url, params=params, timeout=10, allow_redirects=False) as response:
+                if response.status == 302:  # Redirect to actual image
+                    return str(response.headers.get('Location'))
+                else:
+                    self.logger.error(f"Unexpected status code for photo: {response.status}")
+                    return None
+        except Exception as e:
+            self.logger.error(f"Error getting photo URL: {str(e)}")
+            return None
+
+    async def get_photo_data(self, photo_reference: str, max_width: int = 400, max_height: int = 400) -> Optional[bytes]:
+        """Get photo data from Google Places Photo API for caching"""
+        if not photo_reference:
+            return None
+            
+        cache_key = self.cache.get_key(
+            'image_proxy',
+            photoreference=photo_reference,
+            maxwidth=max_width,
+            maxheight=max_height
+        )
+        
+        # Check cache first
+        cached_data = await self.cache.get(cache_key)
+        if cached_data:
+            self.logger.info(f"Photo cache hit for {photo_reference}")
+            return cached_data
+            
+        session = await self.get_session()
+        url = "https://maps.googleapis.com/maps/api/place/photo"
+        params = {
+            'photoreference': photo_reference,
+            'maxwidth': max_width,
+            'maxheight': max_height,
+            'key': self.api_key
+        }
+        
+        try:
+            async with session.get(url, params=params, timeout=10) as response:
+                if response.status == 200:
+                    photo_data = await response.read()
+                    # Cache the photo data
+                    await self.cache.set(cache_key, photo_data, 'image_proxy')
+                    self.logger.info(f"Photo cached for {photo_reference}")
+                    return photo_data
+                else:
+                    self.logger.error(f"Error fetching photo: {response.status}")
+                    return None
+        except Exception as e:
+            self.logger.error(f"Error getting photo data: {str(e)}")
+            return None
 
 # Make sure all async methods in GooglePlacesClient use `await self.get_session()`
 # For example, in places_nearby:

@@ -1,0 +1,31 @@
+{
+  "test_results": {
+    "performance_acceptable": true,
+    "multi_day_structure": true,
+    "llm_landmarks_only": true,
+    "google_restaurants_added": true,
+    "theme_park_detection": true,
+    "theme_park_single_landmark": true,
+    "theme_park_lunch_timing": true,
+    "restaurant_count_correct": true,
+    "meal_distribution_complete": true,
+    "no_duplicate_restaurants": true,
+    "google_places_integration": true,
+    "landmark_enhancement": true,
+    "universal_studios_enhanced": true,
+    "universal_studios_address": true,
+    "universal_studios_photo": true,
+    "day_2_multiple_landmarks": true,
+    "day_2_landmarks_enhanced": true,
+    "day_2_landmarks_address": true,
+    "day_3_multiple_landmarks": true,
+    "day_3_landmarks_enhanced": true,
+    "day_3_landmarks_address": true,
+    "day_3_no_large_gaps": true
+  },
+  "issues": [],
+  "success_rate": 100.0,
+  "overall_passed": true,
+  "duration": 7.646531820297241,
+  "timestamp": 1749443144.766043
+}

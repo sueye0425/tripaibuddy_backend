@@ -1,14 +1,14 @@
 from fastapi import FastAPI, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, validator
+from pydantic import BaseModel, field_validator, model_validator
 from typing import Dict, List, Optional, AsyncGenerator, Any
-from datetime import datetime
+from datetime import datetime, timedelta
 from contextlib import asynccontextmanager
 import aiohttp
 from .recommendations import RecommendationGenerator
 from .places_client import GooglePlacesClient
-from .schema import LandmarkSelection, DayItinerary
-from .complete_itinerary import complete_itinerary_from_landmarks
+from .schema import LandmarkSelection, StructuredItinerary
+from .complete_itinerary import complete_itinerary_from_selection
 import os
 import logging
 import asyncio
@@ -115,7 +115,8 @@ class ItineraryRequest(BaseModel):
     kids_age: Optional[List[int]] = None
     special_requests: Optional[str] = None
 
-    @validator('start_date', 'end_date')
+    @field_validator('start_date', 'end_date')
+    @classmethod
     def validate_date_format(cls, v):
         if v is not None:
             try:
@@ -125,22 +126,20 @@ class ItineraryRequest(BaseModel):
                 raise ValueError('Date must be in YYYY-MM-DD format')
         return v
 
-    @validator('travel_days', always=True)
-    def compute_travel_days(cls, v, values):
-        if v is not None:
-            return v
+    @model_validator(mode='after')
+    def compute_travel_days(self):
+        if self.travel_days is not None:
+            return self
         
         # If travel_days not provided, calculate from start_date and end_date
-        start = values.get('start_date')
-        end = values.get('end_date')
-        
-        if start and end:
-            start_date = datetime.strptime(start, '%Y-%m-%d').date()
-            end_date = datetime.strptime(end, '%Y-%m-%d').date()
+        if self.start_date and self.end_date:
+            start_date = datetime.strptime(self.start_date, '%Y-%m-%d').date()
+            end_date = datetime.strptime(self.end_date, '%Y-%m-%d').date()
             days = (end_date - start_date).days + 1
             if days <= 0:
                 raise ValueError('End date must be after start date')
-            return days
+            self.travel_days = days
+            return self
         
         raise ValueError('Either travel_days or both start_date and end_date must be provided')
 
@@ -170,19 +169,36 @@ async def generate(request: ItineraryRequest):
         logging.exception("Error during /generate")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/complete-itinerary", response_model=DayItinerary)
+@app.post("/complete-itinerary", response_model=StructuredItinerary)
 async def complete_itinerary(data: LandmarkSelection):
     try:
-        result = complete_itinerary_from_landmarks(
-            destination=data.destination,
-            travel_days=data.travel_days,
-            with_kids=data.with_kids,
-            with_elderly=data.with_elderly,
-            selected_landmarks=data.selected_landmarks
-        )
-        return DayItinerary(root=result)
+        logging.info(f"Received complete-itinerary request: {data.model_dump()}")
+        
+        # Get places_client from app_state for Google API enhancement
+        places_client = app_state.get("places_client")
+        
+        # Check if enhanced agentic system should be used
+        use_agentic = os.getenv("ENABLE_AGENTIC_SYSTEM", "false").lower() == "true"
+        
+        if use_agentic:
+            logging.info("🤖 Using Enhanced Agentic Itinerary System")
+            from .agentic_itinerary import complete_itinerary_agentic
+            result = await complete_itinerary_agentic(data, places_client)
+        else:
+            logging.info("🔧 Using Standard Itinerary System")
+            from .complete_itinerary import complete_itinerary_from_selection
+            result = await complete_itinerary_from_selection(data, places_client)
+        
+        logging.info(f"Complete itinerary result: {result}")
+        
+        if isinstance(result, dict) and "error" in result:
+            logging.error(f"Error in itinerary generation: {result['error']}")
+            raise HTTPException(status_code=500, detail=result["error"])
+        
+        return StructuredItinerary(**result)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logging.exception(f"Error in complete-itinerary endpoint: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to complete itinerary: {str(e)}")
 
 @app.get("/api/v1/image_proxy")
 async def image_proxy(photoreference: str, maxwidth: int = 800, maxheight: Optional[int] = None):
@@ -300,3 +316,29 @@ def home():
         "docs_url": "/docs",
         "openapi_url": "/openapi.json"
     }
+
+@app.get("/photo-proxy/{photo_reference}")
+async def photo_proxy(photo_reference: str, maxwidth: int = 400, maxheight: int = 400):
+    """Proxy Google Places photos with caching"""
+    try:
+        places_client = app_state.get("places_client")
+        if not places_client:
+            raise HTTPException(status_code=500, detail="Places client not available")
+            
+        photo_data = await places_client.get_photo_data(photo_reference, maxwidth, maxheight)
+        
+        if not photo_data:
+            raise HTTPException(status_code=404, detail="Photo not found")
+            
+        # Return the image with appropriate headers
+        return Response(
+            content=photo_data,
+            media_type="image/jpeg",
+            headers={
+                "Cache-Control": "public, max-age=86400",  # Cache for 24 hours
+                "Content-Length": str(len(photo_data))
+            }
+        )
+    except Exception as e:
+        logging.exception(f"Error in photo proxy: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error fetching photo: {str(e)}")

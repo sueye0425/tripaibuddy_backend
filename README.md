@@ -208,6 +208,23 @@ This includes:
 python scripts/test_endpoints.py
 ```
 
+### 4. Special case Testing
+```bash
+# Show all options
+python test_agentic_system.py --help
+
+# Clear caches and run fresh comparison  
+python test_agentic_system.py --clear-cache
+python test_agentic_system.py --compare
+
+# Generate curl commands for manual testing
+python test_agentic_system.py --curl
+
+# Enable detailed logging
+export DEBUG_ITINERARY=true
+python test_agentic_system.py --compare
+```
+
 #### GCP Testing
 ```bash
 export API_BASE_URL="https://your-cloud-run-url.run.app"
