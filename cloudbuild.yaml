@@ -68,7 +68,7 @@ steps:
       - '--update-secrets'
       - 'PINECONE_INDEX_NAME=pinecone-index-name:latest'
       - '--set-env-vars'
-      - 'PINECONE_ENVIRONMENT=gcp-starter'
+      - 'PINECONE_ENVIRONMENT=gcp-starter,ENABLE_AGENTIC_SYSTEM=true'
 
 images:
   - 'gcr.io/$PROJECT_ID/tripaibuddy-backend' 

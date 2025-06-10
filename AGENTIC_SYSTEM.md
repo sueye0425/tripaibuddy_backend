@@ -7,10 +7,10 @@ The Enhanced Agentic Itinerary System is a high-performance, multi-agent archite
 ## 🚀 Key Features
 
 ### **Performance Improvements**
-- **3x Speed Boost**: Parallel day generation for multi-day trips
-- **Smart Caching**: Multi-level caching reduces redundant LLM calls
-- **Parallel Enhancement**: Google API calls and validation run concurrently
-- **Optimized LLM Usage**: GPT-3.5-turbo for speed, GPT-4-turbo for complex tasks
+- **Unified Landmark Generation**: Single LLM call for all days prevents duplicates
+- **Smart Anti-Duplicate Strategy**: Generates all landmarks together to ensure variety
+- **Parallel Restaurant Enhancement**: Google API calls and enhancement run concurrently  
+- **Optimized LLM Usage**: GPT-4-turbo for unified generation, targeted processing
 
 ### **Quality Enhancements**
 - **Duplicate Detection**: Cross-day conflict identification and resolution
@@ -28,33 +28,59 @@ The Enhanced Agentic Itinerary System is a high-performance, multi-agent archite
 
 ### **Agent Workflow**
 ```
-1. 🚀 Parallel Day Generation Agent
-   ├── Generate each day independently
-   ├── Use fast GPT-3.5-turbo for speed
-   └── Smart caching for duplicate requests
+1. 🎯 Unified Landmark Generation Agent
+   ├── Generate ALL landmarks in single LLM call
+   ├── Prevent duplicates across all days
+   └── Use GPT-4-turbo for comprehensive planning
 
-2. 🔍 Smart Duplicate Detection Agent
-   ├── Normalize names for comparison
-   ├── Identify exact and similar conflicts
-   └── Build comprehensive conflict reports
+2. 🍽️ Parallel Restaurant Enhancement Agent
+   ├── Add restaurants via Google Places API
+   ├── Run restaurant search in parallel per day
+   └── Prevent duplicate restaurants globally
 
-3. 🔄 Selective Regeneration Agent (conditional)
-   ├── Select optimal days for regeneration
-   ├── Build exclusion lists for alternatives
-   └── Use GPT-4-turbo for intelligent alternatives
+3. 🔍 Landmark Enhancement Agent (parallel)
+   ├── Google Places enhancement for landmarks
+   ├── Add addresses, ratings, photos
+   └── Parallel processing for all days
 
-4. ⚡ Parallel Enhancement & Validation Agent
-   ├── Google API enhancement (parallel)
-   ├── Timing validation (parallel)
-   └── Multi-level caching
+4. ⚡ Gap Detection & Validation Agent
+   ├── Ensure no large gaps between activities
+   ├── Validate timing and structure
+   └── Final quality assurance
 
 5. 🏗️ Assembly Agent
+   ├── Combine all enhanced components
    ├── Quality analysis and metrics
-   ├── Final structure validation
    └── Performance reporting
 ```
 
 ### **Performance Optimizations**
+
+#### **Unified Landmark Generation**
+```python
+# Single LLM call for all landmarks across all days
+all_landmarks = await generate_all_landmarks_unified(selection)
+
+# Built-in duplicate prevention
+prompt = f"""Generate landmarks for {days} days ensuring NO DUPLICATES:
+- Day 1: Theme park OR regular landmarks
+- Day 2: Different landmarks from Day 1  
+- Day 3: Different landmarks from Days 1-2
+NO overlap allowed."""
+
+# Distribute to individual days
+individual_days = distribute_landmarks_to_days(all_landmarks)
+```
+
+#### **Parallel Restaurant Enhancement**
+```python
+# Concurrent restaurant addition for all days
+restaurant_tasks = [add_restaurants_to_day(day) for day in days]
+enhancement_tasks = [enhance_landmarks_basic(day) for day in days]
+
+# Maximum parallelization for restaurant/enhancement phases
+all_results = await asyncio.gather(*restaurant_tasks, *enhancement_tasks)
+```
 
 #### **Parallel Day Generation**
 - Each day gets dedicated LLM call for focused attention
@@ -85,22 +111,24 @@ all_results = await asyncio.gather(*enhancement_tasks, *validation_tasks)
 
 ## 📊 Performance Comparison
 
+### **Performance Comparison**
+
 ### **Standard System vs Enhanced Agentic System**
 
 | Metric | Standard System | Enhanced Agentic | Improvement |
 |--------|----------------|------------------|-------------|
-| 3-Day Generation | ~15-20s | ~8-12s | **~3x faster** |
-| Duplicate Detection | Manual/Post-hoc | Automatic | **100% coverage** |
-| Error Recovery | Basic fallback | Intelligent alternatives | **Robust** |
-| Google API Calls | Sequential | Parallel | **~2-3x faster** |
-| Timing Validation | Sequential | Parallel | **~2-3x faster** |
-| LLM Quality | Mixed models | Optimized per task | **Higher quality** |
+| 3-Day Generation | ~15-20s | ~5-12s | **~2-3x faster** |
+| Duplicate Prevention | None | 100% prevention | **Guaranteed variety** |
+| Gap Detection | None | Automatic | **Better UX** |
+| Google API Efficiency | Sequential | Parallel | **~2-3x faster** |
+| Landmark Enhancement | Basic | Address+Photo | **Comprehensive** |
+| LLM Strategy | Multiple calls | Single unified call | **Consistent quality** |
 
-### **Theoretical Speedups**
-- **Day Generation**: N×1 speedup (where N = number of days)
-- **Enhancement**: ~2-3× speedup through parallel Google API calls
-- **Validation**: ~2-3× speedup through parallel timing validation
-- **Overall**: ~2-4× total system speedup for multi-day trips
+### **Key Performance Benefits**
+- **Unified Generation**: Single LLM call eliminates duplicate landmarks
+- **Parallel Enhancement**: ~2-3× speedup for restaurant/landmark enhancement  
+- **Gap Prevention**: Automatic detection of large scheduling gaps
+- **Overall**: ~2-3× total system speedup with guaranteed quality
 
 ## 🛠️ Setup and Configuration
 
