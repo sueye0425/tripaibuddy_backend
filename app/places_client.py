@@ -1,0 +1,698 @@
+import os
+import time
+import logging
+from typing import Dict, List, Optional, Tuple, Any
+from datetime import datetime, timedelta
+import aiohttp
+import redis.asyncio as aioredis # Updated import
+import json
+import asyncio # Added asyncio for TimeoutError
+from dateutil import parser as date_parser
+from .routes_client import GoogleRoutesClient # Ensure this is the new async version
+
+class RateLimit:
+    def __init__(self, limit: int, window: int):
+        self.limit = limit
+        self.window = window
+        self.tokens = limit
+        self.last_update = time.time()
+
+    def can_proceed(self) -> bool:
+        now = time.time()
+        time_passed = now - self.last_update
+        
+        # Replenish tokens based on time passed
+        self.tokens = min(
+            self.limit,
+            self.tokens + int((time_passed * self.limit) / self.window)
+        )
+        
+        if self.tokens > 0:
+            self.tokens -= 1
+            self.last_update = now
+            return True
+        return False
+
+class RedisCache:
+    def __init__(self, redis_url: str):
+        self.redis_url = redis_url
+        self.client: Optional[aioredis.Redis] = None # Updated type hint
+        self.ttl = {
+            'geocode': 7 * 24 * 60 * 60,  # 1 week
+            'places': 24 * 60 * 60,       # 24 hours
+            'photos': 7 * 24 * 60 * 60,   # 1 week
+            'image_proxy': 7 * 24 * 60 * 60 # 1 week for proxied images
+        }
+        self.logger = logging.getLogger(__name__)
+
+    async def get_client(self) -> aioredis.Redis:
+        if self.client is None:
+            # Use redis.asyncio.from_url with optimized settings
+            self.client = aioredis.from_url(
+                self.redis_url,
+                encoding="utf-8",
+                decode_responses=False,
+                retry_on_timeout=True,
+                socket_timeout=2,  # Reduce timeout to fail fast
+                socket_connect_timeout=2,
+                socket_keepalive=True,
+                health_check_interval=30,
+                max_connections=10  # Limit connections to prevent overwhelming Redis
+            )
+        return self.client
+
+    def get_key(self, key_type: str, **kwargs) -> str:
+        # Use a more efficient cache key format
+        version_prefix = "v4"
+        base_key = ""
+        if key_type == 'geocode':
+            base_key = f"geo:{kwargs['destination']}"
+        elif key_type == 'places':
+            # Use a more compact cache key format
+            special_requests_hash = str(hash(kwargs.get('special_requests', '')))[:8] if kwargs.get('special_requests') else ''
+            keywords_str = ','.join(sorted(kwargs.get('keywords', []))) if isinstance(kwargs.get('keywords'), list) else kwargs.get('keywords', '')
+            keywords_hash = str(hash(keywords_str))[:8]
+            base_key = f"p:{kwargs['destination']}:{kwargs['place_type']}:{keywords_hash}:{special_requests_hash}"
+            self.logger.info(f"Generated cache key for places: {base_key}")
+        elif key_type == 'photos':
+            base_key = f"ph:{kwargs['photo_reference']}"
+        elif key_type == 'image_proxy':
+            photoref = kwargs.get('photoreference', 'no_ref')
+            mw = kwargs.get('maxwidth', 'def_w')
+            mh = kwargs.get('maxheight', 'def_h')
+            base_key = f"img:{photoref}:w{mw}:h{mh}"
+            self.logger.info(f"Generated image proxy cache key: {base_key}")
+        
+        return f"{version_prefix}:{base_key}" if base_key else ""
+
+    async def get(self, key: str) -> Optional[Any]:
+        client = await self.get_client()
+        try:
+            # Add timeout to Redis get operation
+            data = await asyncio.wait_for(
+                client.get(key),
+                timeout=2.0  # 2 second timeout
+            )
+            
+            if not data:
+                return None
+                
+            # If key starts with image_proxy prefix, return raw bytes
+            if key.startswith(f"{self.get_key('image_proxy', photoreference='').split(':')[0]}:img"):
+                self.logger.info(f"Retrieved image from cache for key: {key}")
+                return data
+                
+            # For other data types, try to decode JSON
+            try:
+                return json.loads(data.decode('utf-8'))
+            except (UnicodeDecodeError, json.JSONDecodeError) as e:
+                self.logger.error(f"Error decoding data for key {key}: {str(e)}")
+                return None
+                
+        except asyncio.TimeoutError:
+            self.logger.warning(f"Redis get timeout for key {key}")
+            return None
+        except Exception as e:
+            self.logger.error(f"Redis get error for key {key}: {str(e)}")
+            return None
+
+    async def set(self, key: str, value: Any, ttl_type: str):
+        client = await self.get_client()
+        try:
+            # Add timeout to Redis set operation
+            await asyncio.wait_for(
+                self._do_set(client, key, value, ttl_type),
+                timeout=2.0  # 2 second timeout
+            )
+        except asyncio.TimeoutError:
+            self.logger.warning(f"Redis set timeout for key {key}")
+        except Exception as e:
+            self.logger.error(f"Redis set error for key {key}: {str(e)}")
+
+    async def _do_set(self, client: aioredis.Redis, key: str, value: Any, ttl_type: str):
+        """Helper method to perform the actual Redis set operation"""
+        # Handle binary data for images
+        if ttl_type == 'image_proxy':
+            if not isinstance(value, bytes):
+                self.logger.error(f"Image proxy value must be bytes, got {type(value)}")
+                return
+            data_to_store = value
+        else:
+            # For non-image data, store as JSON
+            data_to_store = json.dumps(value).encode('utf-8') if isinstance(value, (dict, list)) else str(value).encode('utf-8')
+
+        # Get TTL value, default to 1 hour if not found
+        ttl = self.ttl.get(ttl_type, 3600)
+        await client.setex(key, ttl, data_to_store)
+        self.logger.debug(f"Successfully stored data in cache with key: {key}, ttl_type: {ttl_type}")
+
+    async def close(self):
+        if self.client:
+            await self.client.close()
+            await self.client.connection_pool.disconnect() # Ensure pool is disconnected
+            self.client = None
+            self.logger.info("Redis connection and pool closed.")
+
+class GooglePlacesClient:
+    def __init__(self, session: aiohttp.ClientSession):
+        self.api_key = os.getenv('GOOGLE_PLACES_API_KEY')
+        # Initialize GoogleRoutesClient with the same session
+        self.routes_client = GoogleRoutesClient(session=session)
+        self.rate_limits = {
+            'nearby_search': RateLimit(600, 60),
+            'place_details': RateLimit(600, 60),
+            'photos': RateLimit(600, 60)
+        }
+        self.cache = RedisCache(os.getenv('REDIS_URL'))
+        self.logger = logging.getLogger(__name__)
+        self._session = session # This client also uses the passed-in session
+        # self._should_close_session should be False if session is always passed in via lifespan
+        # If GooglePlacesClient can still be instantiated without a session (e.g. in tests),
+        # then _should_close_session logic is needed. Assuming session is always provided from main.py lifespan.
+        self._should_close_session = False 
+
+    async def get_session(self) -> aiohttp.ClientSession:
+        # If session is always provided by __init__, this method might be simplified
+        # or just return self._session directly. The original logic was for cases where
+        # the session might be created by this class.
+        if self._session is None:
+            # This path should ideally not be taken if main.py always provides a session.
+            self.logger.warning("GooglePlacesClient creating its own aiohttp.ClientSession. This should be managed by lifespan.")
+            self._session = aiohttp.ClientSession()
+            self._should_close_session = True 
+        return self._session
+
+    async def places_nearby(self, location: Dict[str, float], radius: int, place_type: str, keyword: Optional[str] = None) -> Dict:
+        """Async version of places_nearby using aiohttp"""
+        session = await self.get_session()
+        url = "https://maps.googleapis.com/maps/api/place/nearbysearch/json"
+        params = {
+            'location': f"{location['lat']},{location['lng']}",
+            'radius': radius,
+            'type': place_type,
+            'key': self.api_key
+        }
+        if keyword:
+            params['keyword'] = keyword
+
+        print(f"\n🌐 DEBUG: Places Nearby API Call")
+        print(f"📍 URL: {url}")
+        print(f"📋 Params: {json.dumps(params, indent=2)}")
+        print(f"🔑 API Key: {self.api_key[:10]}..." if self.api_key else "❌ No API Key")
+        
+        try:
+            async with session.get(url, params=params, timeout=10) as response:
+                print(f"📡 Response Status: {response.status}")
+                result = await response.json()
+                print(f"📥 Full API Response: {json.dumps(result, indent=2)}")
+                
+                if result.get('status') == 'OK':
+                    print(f"✅ Places API SUCCESS - found {len(result.get('results', []))} places")
+                    if result.get('results'):
+                        for i, place in enumerate(result['results'][:3]):  # Show first 3 results
+                            print(f"📍 Result {i+1}: {place.get('name')} - {place.get('place_id')}")
+                    return result
+                elif result.get('status') == 'ZERO_RESULTS':
+                    print(f"🔍 Places API: No results found for query")
+                    return {'results': []}
+                else:
+                    print(f"❌ Places API ERROR: {result.get('status')}")
+                    print(f"❌ Error message: {result.get('error_message', 'No error message')}")
+                    return {'results': []}
+        except Exception as e:
+            print(f"⚠️ Exception in places_nearby: {str(e)}")
+            return {'results': []}
+
+    async def place_details(self, place_id: str) -> Optional[Dict]:
+        """Async version of place using aiohttp"""
+        session = await self.get_session()
+        url = "https://maps.googleapis.com/maps/api/place/details/json"
+        params = {
+            'place_id': place_id,
+            'key': self.api_key,
+            'fields': 'place_id,name,rating,user_ratings_total,formatted_address,geometry/location,opening_hours,photo,price_level,website,formatted_phone_number,wheelchair_accessible_entrance,types'
+        }
+
+        print(f"\n🔍 DEBUG: Place Details API Call")
+        print(f"📍 URL: {url}")
+        print(f"📋 Params: {json.dumps(params, indent=2)}")
+        print(f"🔑 API Key: {self.api_key[:10]}..." if self.api_key else "❌ No API Key")
+        
+        try:
+            async with session.get(url, params=params, timeout=10) as response:
+                print(f"📡 Response Status: {response.status}")
+                result = await response.json()
+                print(f"📥 Full API Response: {json.dumps(result, indent=2)}")
+                
+                if result.get('status') == 'OK':
+                    place_name = result['result'].get('name', 'Unknown')
+                    print(f"✅ Place Details SUCCESS for {place_name}")
+                    
+                    # Log key fields
+                    place_data = result['result']
+                    print(f"🏷️  Name: {place_data.get('name')}")
+                    print(f"🔑 Place ID: {place_data.get('place_id')}")
+                    print(f"⭐ Rating: {place_data.get('rating')}")
+                    print(f"📍 Address: {place_data.get('formatted_address')}")
+                    print(f"📸 Photos: {len(place_data.get('photos', []))} photos")
+                    if place_data.get('photos'):
+                        print(f"📸 First photo ref: {place_data['photos'][0].get('photo_reference', 'No ref')}")
+                    
+                    return result
+                else:
+                    print(f"❌ Place Details ERROR: {result.get('status')}")
+                    print(f"❌ Error message: {result.get('error_message', 'No error message')}")
+                    return None
+        except Exception as e:
+            print(f"⚠️ Exception in place_details: {str(e)}")
+            return None
+
+    async def calculate_radius(self, location: Dict[str, float]) -> int:
+        """Calculate dynamic search radius based on city bounds. Now async."""
+        try:
+            # Get city bounds from geocoding - now awaits the async call
+            geocode_result = await self.routes_client.reverse_geocode(location)
+            if not geocode_result:
+                self.logger.warning("No geocoding results, using default radius")
+                return 10000  # Default 10km radius
+                
+            # Extract bounds from the first result if available
+            for result in geocode_result:
+                if 'address_components' in result:
+                    # Check for San Antonio specifically
+                    is_san_antonio = False
+                    for component in result['address_components']:
+                        if 'long_name' in component and 'San Antonio' in component['long_name']:
+                            is_san_antonio = True
+                            self.logger.info("Location identified as San Antonio, using larger radius")
+                            return 40000  # 40km radius for San Antonio
+                    
+                    # Check the type of area to determine appropriate radius
+                    for component in result['address_components']:
+                        if 'types' in component:
+                            # Major cities get largest radius
+                            if 'locality' in component['types'] or 'administrative_area_level_1' in component['types']:
+                                self.logger.info(f"Found major city/region, using larger radius")
+                                return 30000  # 30km radius
+                            # Smaller cities/towns get medium radius
+                            elif 'sublocality' in component['types'] or 'administrative_area_level_2' in component['types']:
+                                self.logger.info(f"Found smaller city/town, using medium radius")
+                                return 20000  # 20km radius
+                            
+            self.logger.info("No specific area type found, using default radius")
+            return 10000  # Default 10km radius
+        except Exception as e:
+            self.logger.error(f"Error calculating radius: {str(e)}")
+            return 10000  # Default to 10km on error
+
+    async def get_distance_matrix(self, origins: List[Dict[str, float]], destinations: List[Dict[str, float]], mode: str = "driving") -> List[List[Dict[str, Any]]]:
+        """Get distance matrix using async Routes API client"""
+        # Convert mode to Routes API format (DRIVE, WALK, BICYCLE, TRANSIT)
+        # Note: The actual GoogleRoutesClient.calculate_distance_matrix expects mode like "DRIVE"
+        mode_mapping = {
+            "driving": "DRIVE",
+            "walking": "WALK",
+            "bicycling": "BICYCLE",
+            "transit": "TRANSIT" # Assuming GoogleRoutesClient can handle this if it makes sense for the API
+        }
+        routes_mode = mode_mapping.get(mode.lower(), "DRIVE")
+        
+        self.logger.debug(f"Calling async calculate_distance_matrix with mode: {routes_mode}")
+        return await self.routes_client.calculate_distance_matrix(origins, destinations, mode=routes_mode)
+
+    async def get_places(
+        self,
+        location: Dict[str, float],
+        place_type: str,
+        keywords: Optional[List[str]] = None,
+        max_results: int = 20,
+        special_requests: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        """Get places based on location and type, using async calculate_radius."""
+        cache_key = self.cache.get_key(
+            'places',
+            destination=f"{location['lat']},{location['lng']}",
+            place_type=place_type,
+            keywords=','.join(keywords) if keywords else '',
+            special_requests=special_requests
+        )
+        
+        if place_type == 'restaurant':
+            self.logger.info(f"Attempting to fetch restaurants for location: {location}, keywords: {keywords}")
+            self.logger.info(f"Restaurant cache key: {cache_key}")
+
+        cached = await self.cache.get(cache_key)
+        if cached:
+            self.logger.info(f"Found {len(cached)} cached places for {place_type} (keywords: {keywords})")
+            if place_type == 'restaurant':
+                self.logger.info(f"Returning {len(cached)} cached restaurants")
+            return cached
+
+        if place_type == 'restaurant':
+            self.logger.info(f"No cached restaurants found for key: {cache_key}. Fetching from API.")
+
+        if not self.rate_limits['nearby_search'].can_proceed():
+            self.logger.warning("Rate limit reached for nearby search")
+            return []
+
+        try:
+            # Calculate search radius based on location
+            radius = await self.calculate_radius(location)
+            
+            # For restaurants, try multiple search strategies
+            if place_type == 'restaurant' and keywords:
+                detailed_results = await self._search_restaurants_with_fallback(
+                    location, radius, keywords, max_results, special_requests
+                )
+            else:
+                # For non-restaurant searches, use the original approach
+                keyword = ' '.join(keywords) if keywords else None
+                
+                self.logger.info(f"Searching for places of type {place_type} with keywords: {keyword}")
+                
+                results = await self.places_nearby(
+                    location=location,
+                    radius=radius,
+                    place_type=place_type,
+                    keyword=keyword
+                )
+                
+                total_results = len(results.get('results', []))
+                self.logger.info(f"Found {total_results} places for {place_type} from Nearby Search API")
+
+                # Get details for each place in parallel
+                detail_tasks = []
+                for place in results['results'][:max_results]:
+                    if self.rate_limits['place_details'].can_proceed():
+                        detail_tasks.append(self.place_details(place['place_id']))
+
+                detailed_results = []
+                if detail_tasks:
+                    details_list = await asyncio.gather(*detail_tasks, return_exceptions=True)
+                    for details in details_list:
+                        if isinstance(details, dict) and details.get('result'):
+                            detailed_results.append(details['result'])
+                        elif isinstance(details, Exception):
+                            self.logger.error(f"Error fetching place detail: {details}")
+
+            self.logger.info(f"Successfully fetched details for {len(detailed_results)} places")
+            if place_type == 'restaurant':
+                self.logger.info(f"Fetched details for {len(detailed_results)} restaurants")
+
+            # Cache results
+            if detailed_results: # Only cache if we have results
+                await self.cache.set(cache_key, detailed_results, 'places')
+                if place_type == 'restaurant':
+                    self.logger.info(f"Cached {len(detailed_results)} restaurants under key: {cache_key}")
+            elif place_type == 'restaurant':
+                 self.logger.info(f"Not caching restaurants as no detailed results were fetched for key: {cache_key}")
+            return detailed_results
+
+        except Exception as e:
+            self.logger.error(f"Error in get_places: {str(e)}")
+            return []
+
+    async def _search_restaurants_with_fallback(
+        self,
+        location: Dict[str, float],
+        radius: int,
+        keywords: List[str],
+        max_results: int,
+        special_requests: Optional[str]
+    ) -> List[Dict[str, Any]]:
+        """Search for restaurants with multiple fallback strategies."""
+        
+        # Strategy 1: Try with the primary cuisine type only (most specific)
+        if keywords and any('chinese' in kw.lower() for kw in keywords):
+            primary_keyword = 'chinese'
+        else:
+            primary_keyword = keywords[0] if keywords else None
+            
+        if primary_keyword:
+            self.logger.info(f"Restaurant search strategy 1: Using primary keyword '{primary_keyword}'")
+            results = await self.places_nearby(
+                location=location,
+                radius=radius,
+                place_type='restaurant',
+                keyword=primary_keyword
+            )
+            
+            if results.get('results'):
+                self.logger.info(f"Strategy 1 found {len(results['results'])} restaurants")
+                return await self._get_restaurant_details(results['results'], max_results)
+        
+        # Strategy 2: Try without any keywords (broader search)
+        self.logger.info("Restaurant search strategy 2: Searching all restaurants without keywords")
+        results = await self.places_nearby(
+            location=location,
+            radius=radius,
+            place_type='restaurant',
+            keyword=None
+        )
+        
+        if results.get('results'):
+            self.logger.info(f"Strategy 2 found {len(results['results'])} restaurants")
+            return await self._get_restaurant_details(results['results'], max_results)
+        
+        # Strategy 3: Increase radius and try again
+        larger_radius = min(radius * 2, 50000)  # Double radius, max 50km
+        self.logger.info(f"Restaurant search strategy 3: Increasing radius to {larger_radius}m")
+        results = await self.places_nearby(
+            location=location,
+            radius=larger_radius,
+            place_type='restaurant',
+            keyword=None
+        )
+        
+        if results.get('results'):
+            self.logger.info(f"Strategy 3 found {len(results['results'])} restaurants")
+            return await self._get_restaurant_details(results['results'], max_results)
+        
+        self.logger.warning("All restaurant search strategies failed")
+        return []
+
+    async def _get_restaurant_details(self, restaurant_results: List[Dict], max_results: int) -> List[Dict[str, Any]]:
+        """Get detailed information for restaurants."""
+        detail_tasks = []
+        for place in restaurant_results[:max_results]:
+            if self.rate_limits['place_details'].can_proceed():
+                detail_tasks.append(self.place_details(place['place_id']))
+
+        detailed_results = []
+        if detail_tasks:
+            details_list = await asyncio.gather(*detail_tasks, return_exceptions=True)
+            for details in details_list:
+                if isinstance(details, dict) and details.get('result'):
+                    detailed_results.append(details['result'])
+                elif isinstance(details, Exception):
+                    self.logger.error(f"Error fetching restaurant detail: {details}")
+
+        return detailed_results
+
+    def is_place_open_during_dates(
+        self,
+        place: Dict,
+        start_date: Optional[str],
+        end_date: Optional[str]
+    ) -> bool:
+        """Check if place will be open during the travel dates"""
+        if not start_date or not end_date:
+            return True  # If no dates provided, assume it's open
+            
+        try:
+            if 'opening_hours' not in place:
+                return True  # If no hours info, assume it's open
+                
+            start = date_parser.parse(start_date)
+            end = date_parser.parse(end_date)
+            
+            # Check if the place is permanently closed
+            if place.get('business_status') == 'CLOSED_PERMANENTLY':
+                return False
+                
+            # If we have detailed opening hours, check them
+            opening_hours = place['opening_hours']
+            
+            # If the place is currently open, it's likely operational
+            if opening_hours.get('open_now') is True:
+                return True
+                
+            # Check periods if available
+            if 'periods' in opening_hours:
+                # Get all days between start and end date
+                days_to_check = set()
+                current = start
+                while current <= end:
+                    days_to_check.add(current.weekday())
+                    current = current + timedelta(days=1)
+                
+                # Check if the place is open on any of the required days
+                for period in opening_hours['periods']:
+                    open_day = period['open']['day']
+                    close_day = period.get('close', {}).get('day', open_day)
+                    
+                    # Handle overnight periods (close day < open day)
+                    if close_day < open_day:
+                        close_day += 7
+                    
+                    # Check if any day in our range falls within this period
+                    for day in days_to_check:
+                        # Normalize day to handle overnight periods
+                        check_day = day
+                        if check_day < open_day:
+                            check_day += 7
+                            
+                        if open_day <= check_day <= close_day:
+                            return True
+                
+                # If we have periods but none match our days, place is closed
+                return False
+                
+            # If we have weekday_text but no periods, check if any mention "Closed"
+            if 'weekday_text' in opening_hours:
+                days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+                days_to_check = set()
+                current = start
+                while current <= end:
+                    days_to_check.add(days[current.weekday()])
+                    current = current + timedelta(days=1)
+                
+                for day in days_to_check:
+                    day_text = next((text for text in opening_hours['weekday_text'] if text.startswith(day)), '')
+                    if day_text and 'Closed' in day_text:
+                        return False
+                
+            # If we can't determine definitively, assume it's open
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"Error checking opening hours: {str(e)}, place data: {json.dumps(place, indent=2)}")
+            return True  # If we can't determine, assume it's open 
+
+    async def geocode(self, destination: str) -> Optional[Dict[str, Any]]:
+        """Geocode a destination string to coordinates. Uses self.routes_client.reverse_geocode for consistency if preferred, 
+           or can directly use the Geocoding API via self._session if geocode is a distinct capability.
+           Current implementation uses a direct call similar to before but via the shared session.
+        """
+        session = await self.get_session() # Ensures session is available
+        url = "https://maps.googleapis.com/maps/api/geocode/json" # Geocoding API URL
+        params = {
+            'address': destination,
+            'key': self.api_key
+        }
+        self.logger.debug(f"Geocoding (GooglePlacesClient) destination: {destination}")
+        try:
+            async with session.get(url, params=params, timeout=10) as response:
+                response.raise_for_status()
+                result = await response.json()
+                if result.get('status') == 'OK' and result.get('results'):
+                    self.logger.debug(f"Geocoding (GooglePlacesClient) successful for {destination}")
+                    return result['results'][0]['geometry']['location']
+                self.logger.error(f"Geocoding (GooglePlacesClient) API error for {destination}: {result.get('status')}, message: {result.get('error_message', 'No error message')}")
+                return None
+        except aiohttp.ClientResponseError as e:
+            self.logger.error(f"Geocoding (GooglePlacesClient) HTTP error for {destination}: {e.status} {e.message}")
+            return None
+        except asyncio.TimeoutError: # Explicitly catch asyncio.TimeoutError
+            self.logger.error(f"Geocoding (GooglePlacesClient) Timeout for {destination}")
+            return None
+        except Exception as e:
+            self.logger.error(f"Geocoding (GooglePlacesClient) Unexpected error for {destination}: {str(e)}")
+            return None
+
+    async def close(self):
+        """Close the aiohttp session if it was created by this instance, the Redis cache, and the Routes client."""
+        # Session closing logic depends on whether PlacesClient *ever* creates its own session.
+        # If session is *always* passed from main.py, then main.py is responsible for closing it.
+        # PlacesClient should then not attempt to close a session it didn't create.
+        # For now, retaining the _should_close_session logic for safety, but it might be redundant.
+        if self._session and self._should_close_session and not self._session.closed:
+            await self._session.close()
+            self.logger.info("aiohttp ClientSession closed by GooglePlacesClient (because it created it).")
+        
+        # Close RedisCache and GoogleRoutesClient
+        # GoogleRoutesClient.close() is currently a pass-through, as its session is managed externally.
+        # If GoogleRoutesClient had other resources, its close method would handle them.
+        await self.cache.close()
+        await self.routes_client.close() # This will call the new async close in GoogleRoutesClient
+        self.logger.info("RedisCache and GoogleRoutesClient connections managed for closure by GooglePlacesClient.")
+
+    async def get_photo_url(self, photo_reference: str, max_width: int = 400, max_height: int = 400) -> Optional[str]:
+        """Get photo URL from Google Places Photo API"""
+        if not photo_reference:
+            return None
+            
+        session = await self.get_session()
+        url = "https://maps.googleapis.com/maps/api/place/photo"
+        params = {
+            'photoreference': photo_reference,
+            'maxwidth': max_width,
+            'maxheight': max_height,
+            'key': self.api_key
+        }
+        
+        try:
+            async with session.get(url, params=params, timeout=10, allow_redirects=False) as response:
+                if response.status == 302:  # Redirect to actual image
+                    return str(response.headers.get('Location'))
+                else:
+                    self.logger.error(f"Unexpected status code for photo: {response.status}")
+                    return None
+        except Exception as e:
+            self.logger.error(f"Error getting photo URL: {str(e)}")
+            return None
+
+    async def get_photo_data(self, photo_reference: str, max_width: int = 400, max_height: int = 400) -> Optional[bytes]:
+        """Get photo data from Google Places Photo API for caching"""
+        if not photo_reference:
+            return None
+            
+        cache_key = self.cache.get_key(
+            'image_proxy',
+            photoreference=photo_reference,
+            maxwidth=max_width,
+            maxheight=max_height
+        )
+        
+        # Check cache first
+        cached_data = await self.cache.get(cache_key)
+        if cached_data:
+            self.logger.info(f"Photo cache hit for {photo_reference}")
+            return cached_data
+            
+        session = await self.get_session()
+        url = "https://maps.googleapis.com/maps/api/place/photo"
+        params = {
+            'photoreference': photo_reference,
+            'maxwidth': max_width,
+            'maxheight': max_height,
+            'key': self.api_key
+        }
+        
+        try:
+            async with session.get(url, params=params, timeout=10) as response:
+                if response.status == 200:
+                    photo_data = await response.read()
+                    # Cache the photo data
+                    await self.cache.set(cache_key, photo_data, 'image_proxy')
+                    self.logger.info(f"Photo cached for {photo_reference}")
+                    return photo_data
+                else:
+                    self.logger.error(f"Error fetching photo: {response.status}")
+                    return None
+        except Exception as e:
+            self.logger.error(f"Error getting photo data: {str(e)}")
+            return None
+
+# Make sure all async methods in GooglePlacesClient use `await self.get_session()`
+# For example, in places_nearby:
+# async def places_nearby(self, ...)
+#     session = await self.get_session()
+#     ...
+#
+# And in place_details:
+# async def place_details(self, ...)
+#     session = await self.get_session()
+#     ...
+
+# ... (rest of the existing methods) ... 

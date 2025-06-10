@@ -9,5 +9,7 @@ services:
         sync: false
       - key: PINECONE_API_KEY
         sync: false
+      - key: ENABLE_AGENTIC_SYSTEM
+        value: "true"
     plan: free
     autoDeploy: true
