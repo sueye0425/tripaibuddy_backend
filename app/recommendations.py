@@ -73,10 +73,14 @@ class RecommendationGenerator:
             except (TypeError, ValueError):
                 total_ratings = 0
             
+            # Generate proper description based on place types and available info
+            description = self._generate_place_description(place_data)
+            
             # Get other fields with safe defaults
             formatted_place = {
                 "name": name,
-                "description": place_data.get('formatted_address', ''),
+                "description": description,  # Use generated description, not address
+                "address": place_data.get('formatted_address', ''),  # Separate address field
                 "place_id": place_data.get('place_id', ''),
                 "rating": rating,
                 "user_ratings_total": total_ratings,
@@ -104,6 +108,7 @@ class RecommendationGenerator:
             return {
                 "name": place.get('name', 'Unknown Place'),
                 "description": "",
+                "address": place.get('formatted_address', ''),
                 "place_id": place.get('place_id', ''),
                 "rating": 0.0,
                 "user_ratings_total": 0,
@@ -112,6 +117,101 @@ class RecommendationGenerator:
                 "opening_hours": {},
                 "types": []
             }
+
+    def _generate_place_description(self, place_data: Dict[str, Any]) -> str:
+        """Generate a proper description for a place based on its types and Google Places data"""
+        
+        # Try to get editorial summary from Google Places first (best quality)
+        if 'editorial_summary' in place_data and place_data['editorial_summary']:
+            summary = place_data['editorial_summary'].get('overview', '')
+            if summary and len(summary.strip()) > 10:
+                return summary.strip()
+        
+        # Try to get business status or description from other fields
+        if 'business_status' in place_data and place_data['business_status'] == 'OPERATIONAL':
+            # Use first review snippet if available
+            reviews = place_data.get('reviews', [])
+            if reviews and len(reviews) > 0:
+                first_review = reviews[0].get('text', '')
+                if first_review and len(first_review.strip()) > 20:
+                    # Use first sentence of review as description
+                    first_sentence = first_review.split('.')[0].strip()
+                    if len(first_sentence) > 10:
+                        return first_sentence + '.'
+        
+        # Generate description based on place types
+        types = place_data.get('types', [])
+        name = place_data.get('name', '')
+        
+        if not types:
+            return f"Local establishment"
+        
+        # Define type-based descriptions
+        type_descriptions = {
+            'tourist_attraction': 'Popular tourist destination and attraction',
+            'museum': 'Museum with exhibits and collections',
+            'park': 'Park with outdoor recreational facilities',
+            'zoo': 'Zoo featuring various animal exhibits',
+            'aquarium': 'Aquarium with marine life and underwater exhibits',
+            'amusement_park': 'Amusement park with rides and entertainment',
+            'theme_park': 'Theme park with attractions and entertainment',
+            'art_gallery': 'Art gallery showcasing various artworks',
+            'restaurant': 'Restaurant serving food and beverages',
+            'cafe': 'Café with coffee and light meals',
+            'food': 'Food establishment',
+            'meal_takeaway': 'Takeaway food service',
+            'shopping_mall': 'Shopping center with various stores',
+            'store': 'Retail store',
+            'lodging': 'Accommodation and lodging facility',
+            'church': 'Religious place of worship',
+            'mosque': 'Islamic place of worship',
+            'synagogue': 'Jewish place of worship',
+            'hindu_temple': 'Hindu temple and place of worship',
+            'library': 'Library with books and resources',
+            'school': 'Educational institution',
+            'university': 'University and higher education institution',
+            'hospital': 'Medical facility and hospital',
+            'pharmacy': 'Pharmacy and medical supplies',
+            'gas_station': 'Gas station and fuel services',
+            'bank': 'Banking and financial services',
+            'atm': 'ATM and banking services',
+            'post_office': 'Postal services',
+            'gym': 'Fitness center and gym',
+            'spa': 'Spa and wellness services',
+            'beauty_salon': 'Beauty salon and services',
+            'movie_theater': 'Movie theater and cinema',
+            'bowling_alley': 'Bowling alley and entertainment',
+            'night_club': 'Nightclub and entertainment venue',
+            'bar': 'Bar and beverage service',
+            'stadium': 'Stadium and sports venue',
+            'playground': 'Playground for children',
+            'cemetery': 'Cemetery and memorial grounds'
+        }
+        
+        # Find the most specific/relevant type
+        priority_types = [
+            'tourist_attraction', 'museum', 'park', 'zoo', 'aquarium', 
+            'amusement_park', 'theme_park', 'art_gallery', 'restaurant', 
+            'cafe', 'shopping_mall', 'church', 'mosque', 'synagogue', 
+            'hindu_temple', 'library', 'stadium', 'playground'
+        ]
+        
+        # Check priority types first
+        for ptype in priority_types:
+            if ptype in types:
+                return type_descriptions.get(ptype, f"{ptype.replace('_', ' ').title()}")
+        
+        # Check remaining types
+        for place_type in types:
+            if place_type in type_descriptions:
+                return type_descriptions[place_type]
+        
+        # Fallback to the first type, cleaned up
+        if types:
+            first_type = types[0].replace('_', ' ').title()
+            return f"{first_type}"
+        
+        return "Local establishment"
 
     async def generate_recommendations(
         self,

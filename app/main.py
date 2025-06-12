@@ -8,7 +8,6 @@ import aiohttp
 from .recommendations import RecommendationGenerator
 from .places_client import GooglePlacesClient
 from .schema import LandmarkSelection, StructuredItinerary
-from .complete_itinerary import complete_itinerary_from_selection
 import os
 import logging
 import asyncio
@@ -72,6 +71,7 @@ allowed_origins = [
     "http://localhost:5175",
     "http://localhost:5176",
     "http://localhost:5177",
+    "http://localhost:5178",
     "http://localhost:5184",  # Added localhost format
     "http://localhost:8000",  # Backend URL
     "http://localhost:3000",  # Common React dev port
@@ -146,6 +146,10 @@ class ItineraryRequest(BaseModel):
 @app.post("/generate")
 async def generate(request: ItineraryRequest):
     try:
+        logging.info(f"🎯 Generate endpoint called for destination: {request.destination}")
+        
+        # Use the original fast RecommendationGenerator for speed
+        logging.info("🚀 Using Fast RecommendationGenerator System")
         recommendation_generator = app_state["recommendation_generator"]
         result = await recommendation_generator.generate_recommendations(
             destination=request.destination,
@@ -164,6 +168,7 @@ async def generate(request: ItineraryRequest):
                 detail="Could not generate recommendations"
             )
             
+        logging.info(f"✅ Generate completed: {len(result.get('landmarks', {}))} landmarks, {len(result.get('restaurants', {}))} restaurants")
         return result
     except Exception as e:
         logging.exception("Error during /generate")
@@ -177,17 +182,10 @@ async def complete_itinerary(data: LandmarkSelection):
         # Get places_client from app_state for Google API enhancement
         places_client = app_state.get("places_client")
         
-        # Check if enhanced agentic system should be used
-        use_agentic = os.getenv("ENABLE_AGENTIC_SYSTEM", "false").lower() == "true"
-        
-        if use_agentic:
-            logging.info("🤖 Using Enhanced Agentic Itinerary System")
-            from .agentic_itinerary import complete_itinerary_agentic
-            result = await complete_itinerary_agentic(data, places_client)
-        else:
-            logging.info("🔧 Using Standard Itinerary System")
-            from .complete_itinerary import complete_itinerary_from_selection
-            result = await complete_itinerary_from_selection(data, places_client)
+        # Always use the agentic system since the old agentic_itinerary module was deleted
+        logging.info("🔧 Using Agentic System")
+        from .agentic import complete_itinerary_from_selection
+        result = await complete_itinerary_from_selection(data, places_client)
         
         logging.info(f"Complete itinerary result: {result}")
         
@@ -195,7 +193,17 @@ async def complete_itinerary(data: LandmarkSelection):
             logging.error(f"Error in itinerary generation: {result['error']}")
             raise HTTPException(status_code=500, detail=result["error"])
         
-        return StructuredItinerary(**result)
+        # Extract just the itinerary from the agentic result
+        if isinstance(result, dict) and "itinerary" in result:
+            # The agentic system returns {"itinerary": {"itinerary": [...]}}
+            # We need the inner itinerary list
+            itinerary_data = result["itinerary"]
+            if isinstance(itinerary_data, dict) and "itinerary" in itinerary_data:
+                return StructuredItinerary(itinerary=itinerary_data["itinerary"])
+            else:
+                return StructuredItinerary(itinerary=itinerary_data)
+        else:
+            return StructuredItinerary(**result)
     except Exception as e:
         logging.exception(f"Error in complete-itinerary endpoint: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to complete itinerary: {str(e)}")

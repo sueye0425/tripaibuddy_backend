@@ -43,6 +43,7 @@ class ItineraryBlock(BaseModel):
     location: Optional[Location] = None  # Coordinates for internal use
     address: Optional[str] = None  # Human-readable address for display
     photo_url: Optional[str] = None  # Proxy URL for photo if available
+    website: Optional[str] = None  # Official website URL for clickable cards
     notes: Optional[str] = None  # Additional context or recommendations
 
 class StructuredDayPlan(BaseModel):

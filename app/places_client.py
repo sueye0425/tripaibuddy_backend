@@ -230,7 +230,7 @@ class GooglePlacesClient:
         params = {
             'place_id': place_id,
             'key': self.api_key,
-            'fields': 'place_id,name,rating,user_ratings_total,formatted_address,geometry/location,opening_hours,photo,price_level,website,formatted_phone_number,wheelchair_accessible_entrance,types'
+            'fields': 'place_id,name,rating,user_ratings_total,formatted_address,geometry/location,opening_hours,photo,price_level,website,formatted_phone_number,wheelchair_accessible_entrance,types,editorial_summary,reviews,business_status'
         }
 
         print(f"\n🔍 DEBUG: Place Details API Call")
