@@ -103,6 +103,7 @@ def get_cache_key(selection: LandmarkSelection) -> str:
 
 load_dotenv()
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL")
 
 # OPTIMIZATION 1: Use GPT-4-turbo as primary model for quality (user confirmed GPT-3.5-turbo produces inconsistent results)
 llm = ChatOpenAI(
@@ -111,6 +112,7 @@ llm = ChatOpenAI(
     temperature=0.3,  # Lower temperature = more consistent generation
     max_tokens=2000,  # Reduced from 2500 to potentially speed up generation
     request_timeout=25,  # Reasonable timeout for quality model
+    **({"base_url": OPENAI_BASE_URL} if OPENAI_BASE_URL else {})  # Use base_url if set, otherwise use default
 )
 parser = PydanticOutputParser(pydantic_object=StructuredItinerary)
 fallback_parser = OutputFixingParser.from_llm(llm=llm, parser=parser)
@@ -122,6 +124,7 @@ backup_llm = ChatOpenAI(
     temperature=0.3,
     max_tokens=2000,  # Reduced from 2500
     request_timeout=15,  # Shorter timeout for backup model
+    **({"base_url": OPENAI_BASE_URL} if OPENAI_BASE_URL else {})  # Use base_url if set, otherwise use default
 )
 backup_fallback_parser = OutputFixingParser.from_llm(llm=backup_llm, parser=parser)
 

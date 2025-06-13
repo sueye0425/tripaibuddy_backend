@@ -21,6 +21,7 @@ load_dotenv()
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 PINECONE_API_KEY = os.getenv("PINECONE_API_KEY")
 INDEX_NAME = os.getenv("INDEX_NAME")
+OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL")
 
 if not OPENAI_API_KEY:
     raise ValueError("OPENAI_API_KEY environment variable is not set")
@@ -42,7 +43,8 @@ try:
         openai_api_key=OPENAI_API_KEY,
         model_name="gpt-4-turbo",
         temperature=0.5,
-        request_timeout=30  # 30 second timeout
+        request_timeout=30,  # 30 second timeout
+        **({"base_url": OPENAI_BASE_URL} if OPENAI_BASE_URL else {})  # Use base_url if set, otherwise use default
     )
     print("✅ Successfully initialized all API clients")
 except Exception as e:
@@ -322,6 +324,7 @@ def generate_structured_itinerary(
             if actual_count < min_required:
                 return {"error": f"Only {actual_count} valid items after filtering."}
             print(f"✅ Success in {time.time() - total_start:.2f}s")
+            print("result", result)
             return result.model_dump()
         except Exception as e:
             print(f"❌ Error validating result: {str(e)}")
