@@ -308,8 +308,12 @@ class LLMAgent:
             if trip_details.get('withKids'):
                 search_types.extend(["zoo", "aquarium", "playground"])
             
-            # Get existing landmark names to avoid duplicates
+            # Get existing landmark names to avoid duplicates (including across all days)
             existing_names = {landmark.name.lower() for landmark in user_landmarks}
+            
+            # Add landmarks used in other days to prevent duplicates
+            if 'usedLandmarks' in trip_details:
+                existing_names.update(trip_details['usedLandmarks'])
             
             additional_landmarks = []
             needed_landmarks = max(0, 2 - len(user_landmarks))  # Target 2-3 landmarks per day

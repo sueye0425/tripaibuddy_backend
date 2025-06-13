@@ -53,6 +53,10 @@ class StructuredDayPlan(BaseModel):
 class StructuredItinerary(BaseModel):
     itinerary: List[StructuredDayPlan]
 
+class CompleteItineraryResponse(BaseModel):
+    itinerary: StructuredItinerary
+    performance_metrics: Optional[Dict] = None
+
 # Keep the old models for backward compatibility
 class DayPlan(BaseModel):
     morning: Optional[str] = None

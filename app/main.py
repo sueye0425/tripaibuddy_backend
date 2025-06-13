@@ -1,16 +1,19 @@
-from fastapi import FastAPI, HTTPException, Response
+import asyncio
+import logging
+import os
+from contextlib import asynccontextmanager
+from typing import AsyncGenerator, Dict, Any, Optional, List
+from datetime import datetime, timedelta
+
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, field_validator, model_validator
-from typing import Dict, List, Optional, AsyncGenerator, Any
-from datetime import datetime, timedelta
-from contextlib import asynccontextmanager
 import aiohttp
+
+from .complete_itinerary import complete_itinerary_from_selection
+from .schema import LandmarkSelection, StructuredItinerary, StructuredDayPlan, ItineraryBlock, Location, CompleteItineraryResponse
 from .recommendations import RecommendationGenerator
 from .places_client import GooglePlacesClient
-from .schema import LandmarkSelection, StructuredItinerary
-import os
-import logging
-import asyncio
 
 # Configure logging
 logging.basicConfig(
@@ -143,13 +146,327 @@ class ItineraryRequest(BaseModel):
         
         raise ValueError('Either travel_days or both start_date and end_date must be provided')
 
+async def _convert_to_structured_itinerary(
+    old_format_result: Dict[str, Any], 
+    travel_days: int, 
+    destination: str,
+    places_client: Optional[GooglePlacesClient] = None
+) -> Dict[str, Any]:
+    """Convert old format to new structured itinerary format - FAST VERSION"""
+    try:
+        logging.info("🔄 Converting to structured itinerary format (fast mode)")
+        
+        # Extract landmarks and restaurants from old format
+        landmarks_dict = old_format_result.get("landmarks", {})
+        restaurants_dict = old_format_result.get("restaurants", {})
+        
+        landmark_list = list(landmarks_dict.values())
+        restaurant_list = list(restaurants_dict.values())
+        
+        # Create structured itinerary WITHOUT LLM processing for speed
+        itinerary_days = []
+        
+        # Distribute landmarks and restaurants across days
+        landmarks_per_day = len(landmark_list) // travel_days if travel_days > 0 else 0
+        restaurants_per_day = 3  # breakfast, lunch, dinner
+        
+        for day in range(1, travel_days + 1):
+            blocks = []
+            
+            # Add landmarks for this day
+            start_idx = (day - 1) * landmarks_per_day
+            end_idx = start_idx + landmarks_per_day
+            if day == travel_days:  # Last day gets remaining landmarks
+                end_idx = len(landmark_list)
+            
+            day_landmarks = landmark_list[start_idx:end_idx]
+            
+            # Add restaurants for this day (3 meals)
+            day_restaurants = restaurant_list[:3] if len(restaurant_list) >= 3 else restaurant_list
+            
+            # Create time schedule
+            current_time = 8 * 60 + 30  # Start at 8:30 AM
+            
+            # Add breakfast
+            if day_restaurants:
+                restaurant = day_restaurants[0]
+                blocks.append(_create_restaurant_block(restaurant, current_time, "breakfast"))
+                current_time += 45  # 45 minutes for breakfast
+            
+            # Add morning landmarks
+            morning_landmarks = day_landmarks[:len(day_landmarks)//2] if len(day_landmarks) > 1 else day_landmarks[:1]
+            for landmark in morning_landmarks:
+                current_time += 30  # Travel time
+                blocks.append(_create_landmark_block(landmark, current_time))
+                current_time += 120  # 2 hours for landmark
+            
+            # Add lunch
+            if len(day_restaurants) > 1:
+                restaurant = day_restaurants[1]
+                blocks.append(_create_restaurant_block(restaurant, current_time, "lunch"))
+                current_time += 60  # 1 hour for lunch
+            
+            # Add afternoon landmarks
+            afternoon_landmarks = day_landmarks[len(day_landmarks)//2:] if len(day_landmarks) > 1 else []
+            for landmark in afternoon_landmarks:
+                current_time += 30  # Travel time
+                blocks.append(_create_landmark_block(landmark, current_time))
+                current_time += 120  # 2 hours for landmark
+            
+            # Add dinner
+            if len(day_restaurants) > 2:
+                restaurant = day_restaurants[2]
+                current_time = max(current_time, 18 * 60)  # Ensure dinner is at least 6 PM
+                blocks.append(_create_restaurant_block(restaurant, current_time, "dinner"))
+            
+            itinerary_days.append(StructuredDayPlan(day=day, blocks=blocks))
+        
+        return {"itinerary": [day.model_dump() for day in itinerary_days]}
+        
+    except Exception as e:
+        logging.exception(f"Error converting to structured itinerary: {e}")
+        # Fallback to simple conversion
+        return _simple_conversion_fallback(old_format_result, travel_days)
+
+async def _convert_to_structured_itinerary_fast(
+    old_format_result: Dict[str, Any], 
+    travel_days: int
+) -> Dict[str, Any]:
+    """Convert old format to new structured itinerary format - SUPER FAST VERSION (NO LLM)"""
+    try:
+        logging.info("🔄 Converting to structured itinerary format (super fast mode - no LLM)")
+        
+        # Extract landmarks and restaurants from old format
+        landmarks_dict = old_format_result.get("landmarks", {})
+        restaurants_dict = old_format_result.get("restaurants", {})
+        
+        landmark_list = list(landmarks_dict.values())
+        restaurant_list = list(restaurants_dict.values())
+        
+        # Create structured itinerary WITHOUT any external API calls
+        itinerary_days = []
+        
+        # Distribute landmarks and restaurants across days
+        landmarks_per_day = len(landmark_list) // travel_days if travel_days > 0 else 0
+        
+        for day in range(1, travel_days + 1):
+            blocks = []
+            
+            # Add landmarks for this day
+            start_idx = (day - 1) * landmarks_per_day
+            end_idx = start_idx + landmarks_per_day
+            if day == travel_days:  # Last day gets remaining landmarks
+                end_idx = len(landmark_list)
+            
+            day_landmarks = landmark_list[start_idx:end_idx]
+            
+            # Add restaurants for this day (3 meals)
+            day_restaurants = restaurant_list[:3] if len(restaurant_list) >= 3 else restaurant_list
+            
+            # Create time schedule
+            current_time = 8 * 60 + 30  # Start at 8:30 AM
+            
+            # Add breakfast
+            if day_restaurants:
+                restaurant = day_restaurants[0]
+                blocks.append(_create_restaurant_block_fast(restaurant, current_time, "breakfast"))
+                current_time += 45  # 45 minutes for breakfast
+            
+            # Add morning landmarks
+            morning_landmarks = day_landmarks[:len(day_landmarks)//2] if len(day_landmarks) > 1 else day_landmarks[:1]
+            for landmark in morning_landmarks:
+                current_time += 30  # Travel time
+                blocks.append(_create_landmark_block_fast(landmark, current_time))
+                current_time += 120  # 2 hours for landmark
+            
+            # Add lunch
+            if len(day_restaurants) > 1:
+                restaurant = day_restaurants[1]
+                blocks.append(_create_restaurant_block_fast(restaurant, current_time, "lunch"))
+                current_time += 60  # 1 hour for lunch
+            
+            # Add afternoon landmarks
+            afternoon_landmarks = day_landmarks[len(day_landmarks)//2:] if len(day_landmarks) > 1 else []
+            for landmark in afternoon_landmarks:
+                current_time += 30  # Travel time
+                blocks.append(_create_landmark_block_fast(landmark, current_time))
+                current_time += 120  # 2 hours for landmark
+            
+            # Add dinner
+            if len(day_restaurants) > 2:
+                restaurant = day_restaurants[2]
+                current_time = max(current_time, 18 * 60)  # Ensure dinner is at least 6 PM
+                blocks.append(_create_restaurant_block_fast(restaurant, current_time, "dinner"))
+            
+            itinerary_days.append(StructuredDayPlan(day=day, blocks=blocks))
+        
+        return {"itinerary": [day.model_dump() for day in itinerary_days]}
+        
+    except Exception as e:
+        logging.exception(f"Error converting to structured itinerary: {e}")
+        # Fallback to simple conversion
+        return _simple_conversion_fallback(old_format_result, travel_days)
+
+def _create_landmark_block(landmark: Dict[str, Any], start_time_minutes: int) -> ItineraryBlock:
+    """Create a landmark block from landmark data"""
+    location = None
+    if landmark.get('location') and isinstance(landmark['location'], dict):
+        loc_data = landmark['location']
+        if 'lat' in loc_data and 'lng' in loc_data:
+            location = Location(lat=loc_data['lat'], lng=loc_data['lng'])
+    
+    # Extract photo URL
+    photo_url = None
+    photos = landmark.get('photos', [])
+    if photos and len(photos) > 0:
+        photo_url = photos[0]  # Take first photo
+    
+    return ItineraryBlock(
+        type="landmark",
+        name=landmark.get('name', 'Unknown Landmark'),
+        description=landmark.get('description', ''),
+        start_time=_minutes_to_time_string(start_time_minutes),
+        duration="2h",
+        place_id=landmark.get('place_id'),
+        rating=landmark.get('rating'),
+        location=location,
+        address=landmark.get('address'),
+        photo_url=photo_url,
+        website=landmark.get('website')
+    )
+
+def _create_restaurant_block(restaurant: Dict[str, Any], start_time_minutes: int, mealtime: str) -> ItineraryBlock:
+    """Create a restaurant block from restaurant data"""
+    location = None
+    if restaurant.get('location') and isinstance(restaurant['location'], dict):
+        loc_data = restaurant['location']
+        if 'lat' in loc_data and 'lng' in loc_data:
+            location = Location(lat=loc_data['lat'], lng=loc_data['lng'])
+    
+    # Extract photo URL
+    photo_url = None
+    photos = restaurant.get('photos', [])
+    if photos and len(photos) > 0:
+        photo_url = photos[0]  # Take first photo
+    
+    # Duration based on meal type
+    duration = "45m" if mealtime == "breakfast" else "1h" if mealtime == "lunch" else "1.5h"
+    
+    return ItineraryBlock(
+        type="restaurant",
+        name=restaurant.get('name', 'Unknown Restaurant'),
+        description=restaurant.get('description', ''),
+        start_time=_minutes_to_time_string(start_time_minutes),
+        duration=duration,
+        mealtime=mealtime,
+        place_id=restaurant.get('place_id'),
+        rating=restaurant.get('rating'),
+        location=location,
+        address=restaurant.get('address'),
+        photo_url=photo_url,
+        website=restaurant.get('website')
+    )
+
+def _create_landmark_block_fast(landmark: Dict[str, Any], start_time_minutes: int) -> ItineraryBlock:
+    """Create a landmark block from landmark data - FAST VERSION"""
+    location = None
+    if landmark.get('location') and isinstance(landmark['location'], dict):
+        loc_data = landmark['location']
+        if 'lat' in loc_data and 'lng' in loc_data:
+            location = Location(lat=loc_data['lat'], lng=loc_data['lng'])
+    
+    # Extract photo URL
+    photo_url = None
+    photos = landmark.get('photos', [])
+    if photos and len(photos) > 0:
+        photo_url = photos[0]  # Take first photo
+    
+    return ItineraryBlock(
+        type="landmark",
+        name=landmark.get('name', 'Unknown Landmark'),
+        description=landmark.get('description', f"{landmark.get('name', 'This landmark')} is a popular attraction."),  # Simple fallback
+        start_time=_minutes_to_time_string(start_time_minutes),
+        duration="2h",
+        place_id=landmark.get('place_id'),
+        rating=landmark.get('rating'),
+        location=location,
+        address=landmark.get('address'),
+        photo_url=photo_url,
+        website=landmark.get('website')
+    )
+
+def _create_restaurant_block_fast(restaurant: Dict[str, Any], start_time_minutes: int, mealtime: str) -> ItineraryBlock:
+    """Create a restaurant block from restaurant data - FAST VERSION"""
+    location = None
+    if restaurant.get('location') and isinstance(restaurant['location'], dict):
+        loc_data = restaurant['location']
+        if 'lat' in loc_data and 'lng' in loc_data:
+            location = Location(lat=loc_data['lat'], lng=loc_data['lng'])
+    
+    # Extract photo URL
+    photo_url = None
+    photos = restaurant.get('photos', [])
+    if photos and len(photos) > 0:
+        photo_url = photos[0]  # Take first photo
+    
+    # Duration based on meal type
+    duration = "45m" if mealtime == "breakfast" else "1h" if mealtime == "lunch" else "1.5h"
+    
+    return ItineraryBlock(
+        type="restaurant",
+        name=restaurant.get('name', 'Unknown Restaurant'),
+        description=restaurant.get('description', f"{restaurant.get('name', 'This restaurant')} is a popular dining spot."),  # Simple fallback
+        start_time=_minutes_to_time_string(start_time_minutes),
+        duration=duration,
+        mealtime=mealtime,
+        place_id=restaurant.get('place_id'),
+        rating=restaurant.get('rating'),
+        location=location,
+        address=restaurant.get('address'),
+        photo_url=photo_url,
+        website=restaurant.get('website')
+    )
+
+def _minutes_to_time_string(minutes: int) -> str:
+    """Convert minutes since midnight to time string (e.g., 510 -> '08:30')"""
+    hours = minutes // 60
+    mins = minutes % 60
+    return f"{hours:02d}:{mins:02d}"
+
+def _simple_conversion_fallback(old_format_result: Dict[str, Any], travel_days: int) -> Dict[str, Any]:
+    """Simple fallback conversion without LLM enhancement"""
+    landmarks = list(old_format_result.get("landmarks", {}).values())
+    restaurants = list(old_format_result.get("restaurants", {}).values())
+    
+    itinerary_days = []
+    for day in range(1, travel_days + 1):
+        blocks = []
+        
+        # Add a few landmarks and restaurants per day
+        day_landmarks = landmarks[:3] if landmarks else []
+        day_restaurants = restaurants[:3] if restaurants else []
+        
+        current_time = 8 * 60 + 30  # 8:30 AM
+        
+        for i, landmark in enumerate(day_landmarks):
+            blocks.append(_create_landmark_block(landmark, current_time + i * 180))
+        
+        for i, restaurant in enumerate(day_restaurants):
+            mealtime = ["breakfast", "lunch", "dinner"][i]
+            meal_time = [8*60+30, 12*60, 18*60][i]  # 8:30, 12:00, 18:00
+            blocks.append(_create_restaurant_block(restaurant, meal_time, mealtime))
+        
+        itinerary_days.append({"day": day, "blocks": [block.model_dump() for block in blocks]})
+    
+    return {"itinerary": itinerary_days}
+
 @app.post("/generate")
 async def generate(request: ItineraryRequest):
     try:
         logging.info(f"🎯 Generate endpoint called for destination: {request.destination}")
         
-        # Use the original fast RecommendationGenerator for speed
-        logging.info("🚀 Using Fast RecommendationGenerator System")
+        # Use the original fast RecommendationGenerator for speed - NO LLM PROCESSING
+        logging.info("🚀 Using Fast RecommendationGenerator System (NO LLM)")
         recommendation_generator = app_state["recommendation_generator"]
         result = await recommendation_generator.generate_recommendations(
             destination=request.destination,
@@ -167,14 +484,20 @@ async def generate(request: ItineraryRequest):
                 status_code=500,
                 detail="Could not generate recommendations"
             )
+        
+        # Convert old format to new structured itinerary format WITHOUT any LLM processing
+        structured_result = await _convert_to_structured_itinerary_fast(
+            result, 
+            request.travel_days
+        )
             
         logging.info(f"✅ Generate completed: {len(result.get('landmarks', {}))} landmarks, {len(result.get('restaurants', {}))} restaurants")
-        return result
+        return structured_result
     except Exception as e:
         logging.exception("Error during /generate")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/complete-itinerary", response_model=StructuredItinerary)
+@app.post("/complete-itinerary", response_model=CompleteItineraryResponse)
 async def complete_itinerary(data: LandmarkSelection):
     try:
         logging.info(f"Received complete-itinerary request: {data.model_dump()}")
@@ -182,9 +505,8 @@ async def complete_itinerary(data: LandmarkSelection):
         # Get places_client from app_state for Google API enhancement
         places_client = app_state.get("places_client")
         
-        # Always use the agentic system since the old agentic_itinerary module was deleted
-        logging.info("🔧 Using Agentic System")
-        from .agentic import complete_itinerary_from_selection
+        # Use the single LLM call approach from complete_itinerary.py
+        logging.info("🚀 Using Single LLM Call System (complete_itinerary.py)")
         result = await complete_itinerary_from_selection(data, places_client)
         
         logging.info(f"Complete itinerary result: {result}")
@@ -193,17 +515,24 @@ async def complete_itinerary(data: LandmarkSelection):
             logging.error(f"Error in itinerary generation: {result['error']}")
             raise HTTPException(status_code=500, detail=result["error"])
         
-        # Extract just the itinerary from the agentic result
-        if isinstance(result, dict) and "itinerary" in result:
-            # The agentic system returns {"itinerary": {"itinerary": [...]}}
-            # We need the inner itinerary list
-            itinerary_data = result["itinerary"]
-            if isinstance(itinerary_data, dict) and "itinerary" in itinerary_data:
-                return StructuredItinerary(itinerary=itinerary_data["itinerary"])
-            else:
-                return StructuredItinerary(itinerary=itinerary_data)
+        # Extract itinerary and performance metrics
+        itinerary_data = result.get("itinerary")
+        performance_metrics = result.get("performance_metrics")
+
+        if not itinerary_data:
+            raise HTTPException(status_code=500, detail="Failed to generate itinerary content.")
+
+        # The structure can be {"itinerary": {"itinerary": [...]}}
+        if isinstance(itinerary_data, dict) and "itinerary" in itinerary_data:
+            structured_itinerary = StructuredItinerary(itinerary=itinerary_data["itinerary"])
         else:
-            return StructuredItinerary(**result)
+            # Or it could be just the list of day plans
+            structured_itinerary = StructuredItinerary(itinerary=itinerary_data)
+        
+        return CompleteItineraryResponse(
+            itinerary=structured_itinerary,
+            performance_metrics=performance_metrics
+        )
     except Exception as e:
         logging.exception(f"Error in complete-itinerary endpoint: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to complete itinerary: {str(e)}")

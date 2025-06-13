@@ -258,14 +258,17 @@ class RecommendationGenerator:
                 return await self.fallback_to_rag(locals())
                 
             # 4. Refined search for landmarks and restaurants
-            # Base landmark types configuration
+            # 🎯 COST OPTIMIZED: Reduced landmark types configuration
+            # Consolidate similar types to reduce API calls
             base_landmark_configs = [
-                {'type': 'tourist_attraction', 'keywords': ['theme park', 'amusement park', 'disney', 'universal']},
-                {'type': 'museum', 'keywords': ['art', 'history', 'science', 'national']},
-                {'type': 'tourist_attraction', 'keywords': ['monument', 'memorial', 'historic site', 'national mall', 'famous']},
-                {'type': 'park', 'keywords': ['national park', 'state park', 'botanical garden', 'garden', 'famous park']},
-                {'type': 'zoo', 'keywords': []},
-                {'type': 'aquarium', 'keywords': []},
+                # Combine tourist attractions and theme parks into one search
+                {'type': 'tourist_attraction', 'keywords': ['famous', 'popular', 'top attraction', 'must visit']},
+                # Museums and cultural sites
+                {'type': 'museum', 'keywords': ['art', 'history', 'science', 'cultural']},
+                # Parks and outdoor spaces (combine park types)
+                {'type': 'park', 'keywords': ['national park', 'botanical garden', 'famous park']},
+                # Family entertainment (combine zoo/aquarium for efficiency)
+                {'type': 'zoo', 'keywords': ['zoo', 'aquarium', 'wildlife']},
             ]
 
             # Destination-specific adjustments (simple heuristic)
@@ -275,17 +278,22 @@ class RecommendationGenerator:
             if special_requests and "farm" in special_requests.lower() and with_kids: # If user mentions farm
                 landmark_types_config.append({'type': 'tourist_attraction', 'keywords': ['farm', 'petting zoo']})
             
-            # Adjust types based on company (kids/elderly)
+            # Adjust types based on company (kids/elderly) - but keep it minimal
             if with_kids:
-                # Kids get additional family-friendly searches, but theme parks are already in base config
-                if not any(c['type'] == 'zoo' for c in landmark_types_config):
-                    landmark_types_config.append({'type': 'zoo', 'keywords': []})
-                landmark_types_config.append({'type': 'playground', 'keywords': []})
+                # Only add playground if not already covered by parks
+                landmark_types_config.append({'type': 'amusement_park', 'keywords': ['theme park', 'amusement park']})
             else:
-                if not any(c['type'] == 'art_gallery' for c in landmark_types_config):
-                    landmark_types_config.append({'type': 'art_gallery', 'keywords': []})
+                # Add art galleries for adults, but combine with museum search for efficiency
+                if any(c['type'] == 'museum' for c in landmark_types_config):
+                    # Add art gallery keywords to existing museum search
+                    for config in landmark_types_config:
+                        if config['type'] == 'museum':
+                            config['keywords'].extend(['art gallery', 'gallery'])
+                            break
+                else:
+                    landmark_types_config.append({'type': 'art_gallery', 'keywords': ['art', 'gallery']})
 
-            # Remove duplicates that might have been added, prioritizing earlier entries (e.g. theme parks for Orlando)
+            # Remove duplicates that might have been added, prioritizing earlier entries
             unique_landmark_configs = []
             seen_types = set()
             for config in landmark_types_config:
@@ -294,7 +302,7 @@ class RecommendationGenerator:
                     seen_types.add(config['type'])
             landmark_types_config = unique_landmark_configs
 
-            self.logger.info(f"Final landmark_types_config for {destination}: {json.dumps(landmark_types_config)}")
+            self.logger.info(f"💰 Cost-optimized landmark_types_config for {destination}: {json.dumps(landmark_types_config)}")
 
             landmark_tasks = []
             for config in landmark_types_config:
@@ -306,7 +314,7 @@ class RecommendationGenerator:
                         location=location,
                         place_type=config['type'],
                         keywords=current_keywords if current_keywords else None, # Pass None if no keywords
-                        max_results=5  # Keep max_results per type relatively low to get variety
+                        max_results=3  # 🎯 COST REDUCTION: Reduced from 5 to 3 per type
                     )
                 )
             
@@ -331,7 +339,7 @@ class RecommendationGenerator:
                 location=location,
                 place_type='restaurant',
                 keywords=simplified_keywords if simplified_keywords else None,
-                max_results=20,  # Increased from 10 to get more candidates
+                max_results=10,  # 💰 FURTHER COST OPTIMIZATION: Reduced from 12 to 10 for additional savings
                 special_requests=special_requests  # Pass special_requests to affect caching
             )
             
@@ -397,12 +405,9 @@ class RecommendationGenerator:
                             self.logger.warning(f"Skipping place without name: {place}")
                             continue
                             
-                        # Only check dates if both start_date and end_date are provided
-                        # and the place has opening hours
-                        if start_date and end_date and place_data.get('opening_hours'):
-                            if not self.places_client.is_place_open_during_dates(place_data, start_date, end_date):
-                                self.logger.info(f"Skipping {name} as it's not open during the specified dates")
-                                continue
+                        # 🚀 SPEED OPTIMIZATION: Skip opening hours date check for faster /generate
+                        # Note: Date filtering removed for speed optimization in /generate endpoint
+                        # This functionality can be added back in /complete-itinerary if needed
                                 
                         formatted_place = self.format_place(place)
                         landmarks[formatted_place['name']] = formatted_place
@@ -478,9 +483,9 @@ class RecommendationGenerator:
                 min_ratings_threshold = 50 # Example threshold
                 # landmark_list = [lm for lm in landmark_list if int(lm.get('user_ratings_total', 0)) >= min_ratings_threshold]
 
-                # Limit the number of landmarks to a reasonable number (e.g., top 15-20)
-                # This ensures we focus on the most popular/relevant ones.
-                max_ranked_landmarks = 15
+                # 💰 COST OPTIMIZATION: Limit to top quality places for better cost efficiency
+                # Reduce from 15 to 12 landmarks to save API costs
+                max_ranked_landmarks = 12
                 ranked_landmarks_list = landmark_list[:max_ranked_landmarks]
                 
                 # Convert back to a dictionary if the original structure is strictly needed,

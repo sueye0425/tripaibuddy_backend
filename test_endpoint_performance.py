@@ -236,6 +236,70 @@ class TestEndpointPerformance:
         print(f"   - Generate: {len(generate_data['landmarks'])} landmarks, {len(generate_data['restaurants'])} restaurants")
         print(f"   - All descriptions are proper (not addresses or place IDs)")
     
+    def test_complete_itinerary_performance(self):
+        """Test that /complete-itinerary endpoint responds within 10 seconds"""
+        
+        start_time = time.time()
+        
+        response = requests.post(f"{self.BASE_URL}/complete-itinerary", json={
+            "details": {
+                "destination": "San Diego, CA",
+                "travelDays": 2,
+                "startDate": "2025-06-15",
+                "endDate": "2025-06-16",
+                "withKids": False,
+                "withElders": False,
+                "kidsAge": [],
+                "specialRequests": ""
+            },
+            "wishlist": [],
+            "itinerary": [
+                {
+                    "day": 1,
+                    "attractions": [
+                        {
+                            "name": "Balboa Park",
+                            "description": "Large cultural park",
+                            "location": {"lat": 32.7341479, "lng": -117.1498161},
+                            "type": "landmark"
+                        }
+                    ]
+                },
+                {
+                    "day": 2,
+                    "attractions": [
+                        {
+                            "name": "La Jolla Cove",
+                            "description": "Beautiful beach area",
+                            "location": {"lat": 32.8508, "lng": -117.2713},
+                            "type": "landmark"
+                        }
+                    ]
+                }
+            ]
+        }, timeout=12)  # 12s timeout to allow for proper failure detection
+        
+        end_time = time.time()
+        response_time = end_time - start_time
+        
+        # Assert response is successful and within 10 seconds
+        assert response.status_code == 200, f"Complete-itinerary endpoint failed with status {response.status_code}: {response.text}"
+        assert response_time < 10.0, f"Complete-itinerary endpoint took {response_time:.2f}s, should be under 10s"
+        
+        # Assert correct response structure and content
+        data = response.json()
+        assert "itinerary" in data, "Complete-itinerary response missing itinerary"
+        assert len(data["itinerary"]) == 2, "Should return 2 days"
+        
+        # Verify restaurants are generated (3 per day)
+        for day_data in data["itinerary"]:
+            blocks = day_data["blocks"]
+            restaurants = [b for b in blocks if b["type"] == "restaurant"]
+            assert len(restaurants) == 3, f"Day {day_data['day']} should have 3 restaurants, got {len(restaurants)}"
+        
+        print(f"✅ Complete-itinerary endpoint: {response_time:.2f}s (under 10s requirement)")
+        return response_time
+    
     def test_performance_requirements(self):
         """Test overall performance requirements"""
         
@@ -276,6 +340,7 @@ if __name__ == "__main__":
         test_instance.test_endpoint_separation()
         test_instance.test_generate_no_agentic_logs()
         test_instance.test_response_quality()
+        test_instance.test_complete_itinerary_performance()
         test_instance.test_performance_requirements()
         print("\n✅ All tests passed! Endpoint separation is working correctly.")
     except Exception as e:

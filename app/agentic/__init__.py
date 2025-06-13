@@ -302,6 +302,7 @@ async def complete_itinerary_from_selection(data, places_client: GooglePlacesCli
         # Convert the input attractions to StructuredDayPlan format
         structured_days = []
         used_restaurants = set()
+        used_landmarks = set()  # Track landmarks across all days to prevent duplicates
         
         # Get destination coordinates for landmark expansion
         location = await places_client.geocode(destination)
@@ -324,6 +325,7 @@ async def complete_itinerary_from_selection(data, places_client: GooglePlacesCli
                     location=Location(lat=attraction.location.lat, lng=attraction.location.lng) if attraction.location else None
                 )
                 day_blocks.append(landmark_block)
+                used_landmarks.add(attraction.name.lower())  # Track this landmark
             
             # 🧠 Use LLM Agent for intelligent landmark generation and timing
             trip_details = {
@@ -331,7 +333,8 @@ async def complete_itinerary_from_selection(data, places_client: GooglePlacesCli
                 "kidsAge": kids_age,
                 "withElders": with_elderly,
                 "specialRequests": special_requests,
-                "travelDays": travel_days
+                "travelDays": travel_days,
+                "usedLandmarks": used_landmarks  # Pass used landmarks to prevent duplicates
             }
             
             enhanced_landmarks = await llm_agent.generate_landmarks_with_timing(
@@ -341,6 +344,11 @@ async def complete_itinerary_from_selection(data, places_client: GooglePlacesCli
                 trip_details=trip_details,
                 places_client=places_client
             )
+            
+            # Update used landmarks with newly generated ones
+            for landmark in enhanced_landmarks:
+                if landmark.type == "landmark":
+                    used_landmarks.add(landmark.name.lower())
             
             # Create structured day plan with LLM-enhanced landmarks
             day_plan = StructuredDayPlan(day=day_data.day, blocks=enhanced_landmarks)
