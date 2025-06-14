@@ -148,6 +148,7 @@ pip install -r requirements.txt
 - Fill in your API keys and configuration:
   ```
   OPENAI_API_KEY=your_openai_api_key
+  OPENAI_BASE_URL=https://your-custom-openai-url.com
   GOOGLE_PLACES_API_KEY=your_google_places_api_key
   REDIS_URL=redis://localhost:6379
   PINECONE_API_KEY=your_pinecone_api_key

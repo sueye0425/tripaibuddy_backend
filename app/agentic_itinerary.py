@@ -52,6 +52,7 @@ logger = logging.getLogger(__name__)
 
 # Feature flag for agentic system
 ENABLE_AGENTIC_SYSTEM = os.getenv("ENABLE_AGENTIC_SYSTEM", "false").lower() == "true"
+OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL")
 
 @dataclass
 class AgentState:
@@ -96,7 +97,8 @@ class EnhancedAgenticItinerarySystem:
             model_name="gpt-3.5-turbo",  # Keep gpt-3.5-turbo for regeneration speed
             temperature=0.3,
             max_tokens=2000,
-            request_timeout=10  # Reduced timeout for performance
+            request_timeout=10,  # Reduced timeout for performance
+            **({"base_url": OPENAI_BASE_URL} if OPENAI_BASE_URL else {})  # Use base_url if set, otherwise use default
         )
         
         # Fast LLM for parallel day generation - use GPT-4-turbo as requested
@@ -106,6 +108,7 @@ class EnhancedAgenticItinerarySystem:
             temperature=0.3,
             max_tokens=1500,
             request_timeout=15  # Reduced timeout for performance
+            **({"base_url": os.getenv("OPENAI_BASE_URL")} if os.getenv("OPENAI_BASE_URL") else {})
         )
         
         # Thread pool for CPU-bound operations

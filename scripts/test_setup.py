@@ -31,7 +31,8 @@ def test_openai():
         client = OpenAI(
             api_key=os.getenv('OPENAI_API_KEY'),
             timeout=30.0,
-            max_retries=2
+            max_retries=2,
+            **({"base_url": os.getenv("OPENAI_BASE_URL")} if os.getenv("OPENAI_BASE_URL") else {})  # Use base_url if set, otherwise use default
         )
         response = client.chat.completions.create(
             model="gpt-3.5-turbo",
