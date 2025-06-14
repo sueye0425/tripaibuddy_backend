@@ -9,6 +9,8 @@ from .recommendations import RecommendationGenerator
 from .places_client import GooglePlacesClient
 from .schema import LandmarkSelection, StructuredItinerary
 from .complete_itinerary import complete_itinerary_from_selection
+from .redis_client import redis_client
+from decorators.rate_limit import rate_limit
 import os
 import logging
 import asyncio
@@ -29,11 +31,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     client_session = None
     try:
         client_session = aiohttp.ClientSession()
-        places_client = GooglePlacesClient(session=client_session)
+        places_client = GooglePlacesClient(session=client_session, redis_client=redis_client)
         recommendation_generator = RecommendationGenerator(places_client=places_client)
         
         app_state["client_session"] = client_session
         app_state["places_client"] = places_client
+        app_state["redis_client"] = redis_client
         app_state["recommendation_generator"] = recommendation_generator
         
         logging.info("Application lifespan: Startup sequence completed. Clients initialized.")
@@ -49,6 +52,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                 logging.info("Application lifespan: GooglePlacesClient closed.")
             except Exception as e:
                 logging.exception("Application lifespan: Error closing GooglePlacesClient.")
+        
+        if "redis_client" in app_state and app_state["redis_client"]:
+            # Close Redis client
+            try:
+                await app_state["redis_client"].close()
+                logging.info("Application lifespan: Redis client closed.")
+            except Exception as e:
+                logging.exception("Application lifespan: Error closing Redis client.")
         
         if client_session and not client_session.closed:
             try:
@@ -143,6 +154,7 @@ class ItineraryRequest(BaseModel):
         
         raise ValueError('Either travel_days or both start_date and end_date must be provided')
 
+@rate_limit(endpoint="generate", limit=50)
 @app.post("/generate")
 async def generate(request: ItineraryRequest):
     try:
@@ -169,6 +181,7 @@ async def generate(request: ItineraryRequest):
         logging.exception("Error during /generate")
         raise HTTPException(status_code=500, detail=str(e))
 
+@rate_limit(endpoint="complete_itinerary", limit=50)
 @app.post("/complete-itinerary", response_model=StructuredItinerary)
 async def complete_itinerary(data: LandmarkSelection):
     try:
@@ -224,13 +237,12 @@ async def image_proxy(photoreference: str, maxwidth: int = 800, maxheight: Optio
         cache_key_params['maxheight'] = maxheight
     
     cache_key = places_client.cache.get_key('image_proxy', **cache_key_params)
-    redis_client = await places_client.cache.get_client()
     
     try:
         # Try to get from cache with a short timeout
         try:
             cached_image = await asyncio.wait_for(
-                redis_client.get(cache_key),
+                places_client.cache.redis_client.get(cache_key),
                 timeout=1.0  # 1 second timeout for cache
             )
             if cached_image:
@@ -266,10 +278,10 @@ async def image_proxy(photoreference: str, maxwidth: int = 800, maxheight: Optio
                     try:
                         # Try to cache but don't wait too long
                         await asyncio.wait_for(
-                            redis_client.setex(
+                            places_client.cache.redis_client.set(
                                 cache_key,
-                                places_client.cache.ttl['image_proxy'],
-                                img_data
+                                img_data,
+                                places_client.cache.ttl['image_proxy']
                             ),
                             timeout=1.0  # 1 second timeout for cache set
                         )
@@ -310,7 +322,7 @@ async def health_check():
     return {"status": "healthy"}
 
 @app.get("/")
-def home():
+async def home():
     return {
         "message": "🎒 Welcome to TripAIBuddy API!",
         "docs_url": "/docs",
