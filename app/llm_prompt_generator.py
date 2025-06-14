@@ -27,75 +27,6 @@ class LLMPromptGenerator:
     def __init__(self):
         self.logger = logging.getLogger(__name__)
     
-    def generate_landmark_timing_prompt(
-        self,
-        destination: str,
-        day_num: int,
-        existing_landmarks: List[Dict],
-        trip_details: Dict,
-        is_theme_park_day: bool = False
-    ) -> str:
-        """Generate LLM prompt for intelligent landmark timing and scheduling"""
-        
-        # Build context about existing landmarks
-        existing_context = self._build_existing_landmarks_context(existing_landmarks)
-        
-        # Build traveler context
-        traveler_context = self._build_traveler_context(trip_details)
-        
-        # Build timing requirements
-        timing_requirements = self._build_timing_requirements(is_theme_park_day)
-        
-        # Generate the prompt
-        prompt = f"""You are an expert travel planner creating a detailed daily itinerary for {destination}.
-
-DESTINATION: {destination}
-DAY: {day_num}
-TRAVELER PROFILE: {traveler_context}
-
-EXISTING LANDMARKS:
-{existing_context}
-
-TASK: Create a complete daily schedule with proper timing to avoid gaps.
-
-{timing_requirements}
-
-CRITICAL REQUIREMENTS:
-1. NO GAPS longer than 2 hours between activities
-2. Activities must span from 9:00 AM to 7:00 PM
-3. Include 2-3 additional landmarks if not a theme park day
-4. Provide specific start times and realistic durations
-5. Consider travel time between locations
-6. Ensure logical flow throughout the day
-
-SPECIAL REQUESTS: {trip_details.get('specialRequests', 'None')}
-
-OUTPUT FORMAT (JSON):
-{{
-    "landmarks": [
-        {{
-            "name": "Landmark Name",
-            "description": "Brief description",
-            "start_time": "HH:MM",
-            "duration": "Xh" or "XhYm",
-            "reasoning": "Why this timing works",
-            "location_type": "indoor/outdoor/mixed"
-        }}
-    ],
-    "meal_suggestions": [
-        {{
-            "meal_type": "breakfast/lunch/dinner",
-            "suggested_time": "HH:MM",
-            "reasoning": "Why this timing prevents gaps"
-        }}
-    ],
-    "day_flow_analysis": "Overall analysis of day timing and gap prevention"
-}}
-
-Generate a well-timed itinerary that keeps travelers engaged throughout the day without exhausting gaps."""
-        
-        return prompt
-    
     def generate_gap_detection_prompt(
         self,
         day_blocks: List[ItineraryBlock],
@@ -213,24 +144,7 @@ OUTPUT FORMAT (JSON):
 Focus on landmarks that create seamless day flow without overwhelming the traveler."""
         
         return prompt
-    
-    def _build_existing_landmarks_context(self, landmarks: List[Dict]) -> str:
-        """Build context string for existing landmarks"""
-        if not landmarks:
-            return "No existing landmarks scheduled."
-        
-        context_lines = []
-        for landmark in landmarks:
-            duration_str = landmark.get('duration', '2h')
-            start_time = landmark.get('start_time', 'TBD')
-            name = landmark.get('name', 'Unknown')
-            description = landmark.get('description', '')
-            context_lines.append(
-                f"- {name}: {start_time} ({duration_str}) - {description}"
-            )
-        
-        return "\n".join(context_lines)
-    
+
     def _build_traveler_context(self, trip_details: Dict) -> str:
         """Build traveler context for LLM prompts"""
         context_parts = []
@@ -250,203 +164,100 @@ Focus on landmarks that create seamless day flow without overwhelming the travel
         context_parts.append(f"Trip duration: {travel_days} days")
         
         return "; ".join(context_parts) if context_parts else "Standard adult travelers"
-    
-    def _build_timing_requirements(self, is_theme_park_day: bool) -> str:
-        """Build timing requirements based on day type"""
-        if is_theme_park_day:
-            return """THEME PARK DAY TIMING:
-- Single major attraction: 8-10 hours duration
-- Start time: 9:00 AM
-- Meals integrated within or nearby the park
-- Minimal additional landmarks needed"""
-        else:
-            return """REGULAR DAY TIMING:
-- Multiple landmarks: 2-3 activities
-- Activity duration: 1.5-3 hours each
-- Start first activity: 9:00-10:00 AM
-- End last activity: 6:00-7:00 PM
-- Strategic meal placement to prevent gaps
-- Variety in activity types and energy levels"""
-    
+
     def _analyze_current_schedule(self, blocks: List[ItineraryBlock]) -> str:
-        """Analyze current schedule for gap detection prompt"""
+        """Analyze the current schedule to identify gaps and issues"""
+        
         if not blocks:
-            return "No activities scheduled."
+            return "No activities scheduled yet."
         
         # Sort blocks by start time
-        sorted_blocks = []
-        for block in blocks:
-            if block.start_time:
-                try:
-                    start_time = datetime.strptime(block.start_time, "%H:%M")
-                    sorted_blocks.append((start_time, block))
-                except ValueError:
-                    continue
-        
-        sorted_blocks.sort(key=lambda x: x[0])
-        
-        # Build schedule analysis
-        analysis_lines = []
-        for i, (start_time, block) in enumerate(sorted_blocks):
-            duration_str = block.duration or "1h"
-            block_type = block.type or "activity"
+        try:
+            sorted_blocks = sorted(
+                [b for b in blocks if b.start_time], 
+                key=lambda b: datetime.strptime(b.start_time, "%H:%M")
+            )
+        except (ValueError, TypeError):
+            # Handle cases where start_time is missing or invalid
+            return "Invalid schedule format; unable to analyze."
+
+        if not sorted_blocks:
+            return "No activities with valid start times."
             
-            # Calculate end time
-            try:
-                duration_minutes = self._parse_duration_to_minutes(duration_str)
-                end_time = start_time + timedelta(minutes=duration_minutes)
-                
-                analysis_lines.append(
-                    f"{i+1}. {start_time.strftime('%H:%M')}-{end_time.strftime('%H:%M')}: "
-                    f"{block.name} ({block_type}, {duration_str})"
-                )
-                
-                # Check gap to next activity
-                if i < len(sorted_blocks) - 1:
-                    next_start_time = sorted_blocks[i + 1][0]
-                    gap_minutes = (next_start_time - end_time).total_seconds() / 60
-                    if gap_minutes > 0:
-                        gap_hours = gap_minutes / 60
-                        analysis_lines.append(f"   → GAP: {gap_minutes:.0f} minutes ({gap_hours:.1f} hours)")
-                
-            except Exception:
-                analysis_lines.append(f"{i+1}. {block.start_time}: {block.name} ({block_type})")
+        schedule_lines = []
+        last_end_time = None
         
-        return "\n".join(analysis_lines)
-    
+        # Set day start time
+        day_start_time = datetime.strptime("09:00", "%H:%M").time()
+        
+        first_activity_start_time = datetime.strptime(sorted_blocks[0].start_time, "%H:%M").time()
+        if first_activity_start_time > day_start_time:
+            gap_duration = datetime.combine(datetime.today(), first_activity_start_time) - datetime.combine(datetime.today(), day_start_time)
+            schedule_lines.append(f"GAP: {gap_duration} before the first activity.")
+            
+        for block in sorted_blocks:
+            start_time_dt = datetime.strptime(block.start_time, "%H:%M")
+            
+            if last_end_time:
+                gap = start_time_dt - last_end_time
+                if gap.total_seconds() > 120 * 60: # More than 2 hours
+                    schedule_lines.append(f"GAP: {gap} between {schedule_lines[-1].split(' ')[0]} and {block.name}")
+            
+            duration_minutes = self._parse_duration_to_minutes(block.duration)
+            end_time_dt = start_time_dt + timedelta(minutes=duration_minutes)
+            last_end_time = end_time_dt
+            
+            schedule_lines.append(
+                f"{block.name}: {block.start_time} - {end_time_dt.strftime('%H:%M')} ({block.duration})"
+            )
+            
+        return "\n".join(schedule_lines)
+        
     def _parse_duration_to_minutes(self, duration_str: str) -> int:
-        """Parse duration string to minutes"""
+        """Parse duration string (e.g., '2h', '1h30m', '45m') into minutes."""
         if not duration_str:
-            return 60
+            return 120  # Default to 2 hours
         
-        duration_str = duration_str.lower().strip()
-        
-        if duration_str.endswith('h'):
-            hours_str = duration_str[:-1]
-            try:
-                hours = float(hours_str)
-                return int(hours * 60)
-            except ValueError:
-                return 60
-        elif 'h' in duration_str and 'm' in duration_str:
-            # Format like "2h30m"
-            try:
-                parts = duration_str.replace('h', ':').replace('m', '').split(':')
-                hours = int(parts[0])
-                minutes = int(parts[1]) if len(parts) > 1 else 0
-                return hours * 60 + minutes
-            except ValueError:
-                return 60
-        else:
-            try:
-                return int(float(duration_str) * 60)
-            except ValueError:
-                return 60
-
-
-class RegenerationAgent:
-    """Agent responsible for regenerating landmarks when gaps are detected"""
-    
-    def __init__(self, llm_client=None):
-        self.llm_client = llm_client
-        self.prompt_generator = LLMPromptGenerator()
-        self.logger = logging.getLogger(__name__)
-    
-    async def detect_and_fix_gaps(
-        self,
-        day_blocks: List[ItineraryBlock],
-        destination: str,
-        day_num: int,
-        trip_details: TripDetails
-    ) -> List[ItineraryBlock]:
-        """Detect gaps and regenerate landmarks to fix them"""
+        duration_str = duration_str.lower()
+        total_minutes = 0
         
         try:
-            # Generate gap detection prompt
-            gap_prompt = self.prompt_generator.generate_gap_detection_prompt(
-                day_blocks, destination, day_num
-            )
-            
-            # Call LLM for gap analysis (if LLM client available)
-            if self.llm_client:
-                gap_analysis = await self._call_llm_for_gap_analysis(gap_prompt)
+            if 'h' in duration_str:
+                parts = duration_str.split('h')
+                total_minutes += int(parts[0]) * 60
+                if parts[1] and 'm' in parts[1]:
+                    total_minutes += int(parts[1].replace('m', ''))
+            elif 'm' in duration_str:
+                total_minutes += int(duration_str.replace('m', ''))
+            else:
+                # Assume it's hours if no suffix
+                total_minutes = int(float(duration_str) * 60)
                 
-                if gap_analysis.get("regeneration_needed", False):
-                    self.logger.info(f"🔄 Gaps detected on Day {day_num}, regenerating landmarks...")
-                    
-                    # Generate landmark expansion prompt
-                    time_slots = self._extract_time_slots_from_analysis(gap_analysis)
-                    existing_landmark_names = [b.name for b in day_blocks if b.type == "landmark"]
-                    
-                    expansion_prompt = self.prompt_generator.generate_landmark_expansion_prompt(
-                        destination, existing_landmark_names, trip_details, time_slots
-                    )
-                    
-                    # Get new landmarks to fill gaps
-                    new_landmarks = await self._call_llm_for_landmark_expansion(expansion_prompt)
-                    
-                    # Integrate new landmarks into day blocks
-                    enhanced_blocks = self._integrate_new_landmarks(day_blocks, new_landmarks)
-                    
-                    self.logger.info(f"✅ Day {day_num} gaps fixed with {len(new_landmarks)} additional landmarks")
-                    return enhanced_blocks
+        except (ValueError, IndexError):
+            logger.warning(f"Could not parse duration: '{duration_str}'. Defaulting to 120 minutes.")
+            return 120
             
-            # If no LLM or no gaps detected, return original blocks
-            return day_blocks
-            
-        except Exception as e:
-            self.logger.error(f"Error in gap detection/fixing: {e}")
-            return day_blocks
+        return total_minutes if total_minutes > 0 else 120
+
+def generate_gap_detection_prompt(
+    day_blocks: List[ItineraryBlock],
+    destination: str,
+    day_num: int
+) -> str:
+    """Generate LLM prompt for gap detection and regeneration suggestions"""
     
-    async def _call_llm_for_gap_analysis(self, prompt: str) -> Dict[str, Any]:
-        """Call LLM for gap analysis (placeholder for actual LLM integration)"""
-        # This would integrate with your actual LLM client (OpenAI, Anthropic, etc.)
-        # For now, return a mock response
-        return {
-            "gaps_detected": [],
-            "regeneration_needed": False,
-            "regeneration_suggestions": [],
-            "overall_assessment": "Schedule analysis completed"
-        }
+    prompt_generator = LLMPromptGenerator()
+    return prompt_generator.generate_gap_detection_prompt(day_blocks, destination, day_num)
+
+def generate_landmark_expansion_prompt(
+    destination: str,
+    existing_landmarks: List[str],
+    trip_details: TripDetails,
+    time_slots_to_fill: List[Dict[str, str]]
+) -> str:
+    """Generate LLM prompt for intelligent landmark expansion to fill gaps"""
     
-    async def _call_llm_for_landmark_expansion(self, prompt: str) -> List[Dict[str, Any]]:
-        """Call LLM for landmark expansion (placeholder for actual LLM integration)"""
-        # This would integrate with your actual LLM client
-        # For now, return empty list
-        return []
-    
-    def _extract_time_slots_from_analysis(self, gap_analysis: Dict[str, Any]) -> List[Dict[str, str]]:
-        """Extract time slots that need to be filled from gap analysis"""
-        time_slots = []
-        
-        for gap in gap_analysis.get("gaps_detected", []):
-            # Parse gap information to create time slots
-            # This is a simplified implementation
-            time_slots.append({
-                "start_time": "14:00",  # Example
-                "end_time": "16:00",    # Example
-                "duration": "2h"       # Example
-            })
-        
-        return time_slots
-    
-    def _integrate_new_landmarks(
-        self,
-        existing_blocks: List[ItineraryBlock],
-        new_landmarks: List[Dict[str, Any]]
-    ) -> List[ItineraryBlock]:
-        """Integrate new landmarks into existing day blocks"""
-        enhanced_blocks = existing_blocks.copy()
-        
-        for landmark_data in new_landmarks:
-            # Create new ItineraryBlock from landmark data
-            new_block = ItineraryBlock(
-                name=landmark_data.get("name", "New Landmark"),
-                type="landmark",
-                description=landmark_data.get("description", ""),
-                start_time=landmark_data.get("target_time_slot", "").split(" - ")[0],
-                duration=landmark_data.get("duration", "2h")
-            )
-            enhanced_blocks.append(new_block)
-        
-        return enhanced_blocks 
+    prompt_generator = LLMPromptGenerator()
+    return prompt_generator.generate_landmark_expansion_prompt(
+        destination, existing_landmarks, trip_details, time_slots_to_fill
+    ) 

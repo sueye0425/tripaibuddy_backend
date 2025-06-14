@@ -353,9 +353,9 @@ async def complete_itinerary_from_selection(data, places_client: GooglePlacesCli
             # Create structured day plan with LLM-enhanced landmarks
             day_plan = StructuredDayPlan(day=day_data.day, blocks=enhanced_landmarks)
             
-            # Enhance the day with restaurants using intelligent timing
-            enhanced_day = await enhancement_agent._enhance_day_with_restaurants(
-                day_plan, places_client, destination, used_restaurants
+            # Enhance the day with landmarks using intelligent timing
+            enhanced_day = await enhancement_agent.enhance_day_with_landmarks(
+                day_plan, places_client, destination
             )
             
             # 🔍 Apply regeneration agent for gap detection and fixing

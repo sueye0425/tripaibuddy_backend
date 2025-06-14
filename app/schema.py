@@ -34,7 +34,7 @@ class LandmarkSelection(BaseModel):
 class ItineraryBlock(BaseModel):
     type: str  # "landmark" or "restaurant"
     name: str
-    description: str
+    description: Optional[str] = None  # Optional - landmarks have descriptions, restaurants don't
     start_time: str  # e.g., "9:00 AM"
     duration: str  # e.g., "2 hours"
     mealtime: Optional[str] = None  # "lunch" or "dinner" - only for restaurants

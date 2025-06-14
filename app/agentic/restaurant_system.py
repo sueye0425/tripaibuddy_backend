@@ -3,7 +3,7 @@ Restaurant integration system for agentic itinerary generation.
 Handles restaurant search, description enhancement, and meal scheduling.
 """
 import logging
-from typing import Dict, List, Optional, Set, Any
+from typing import Dict, List, Optional
 import asyncio
 from datetime import datetime, timedelta
 
@@ -739,44 +739,11 @@ class RestaurantSystem:
             logger.error(f"Error finding optimal lunch time: {e}")
             return None
     
-    def _find_optimal_dinner_time(self, landmark_times: List[Dict]) -> Optional[str]:
-        """Find optimal dinner time to prevent large evening gaps"""
-        
-        try:
-            # Dinner should be after last activity but not too late
-            if landmark_times:
-                last_activity_end = landmark_times[-1]["end"]
-                
-                # Dinner 1 hour after last activity to prevent gaps, but not before 17:00 or after 20:00
-                dinner_time = last_activity_end + timedelta(hours=1)
-                
-                # Ensure reasonable dinner time
-                earliest_dinner = datetime.strptime("17:00", "%H:%M")
-                latest_dinner = datetime.strptime("20:00", "%H:%M")
-                
-                # If dinner would be too early, schedule it for a reasonable time
-                if dinner_time < earliest_dinner:
-                    # Check if we can fit dinner earlier to prevent gaps
-                    # If last activity ends before 16:00, schedule dinner at 17:00
-                    if last_activity_end.hour < 16:
-                        dinner_time = earliest_dinner
-                    else:
-                        # If last activity ends after 16:00, schedule dinner 30 min after
-                        dinner_time = last_activity_end + timedelta(minutes=30)
-                elif dinner_time > latest_dinner:
-                    dinner_time = latest_dinner
-                
-                return dinner_time.strftime("%H:%M")
-            
-            return None
-            
-        except Exception as e:
-            logger.error(f"Error finding optimal dinner time: {e}")
-            return None
-    
     def _find_optimal_dinner_time_with_lunch(self, landmark_times: List[Dict], lunch_end_time: datetime) -> Optional[str]:
-        """Find optimal dinner time considering lunch end time to prevent gaps"""
-        
+        """
+        Finds the optimal dinner time based on landmark schedule and lunch time.
+        Tries to place dinner at 19:00, but avoids conflicts.
+        """
         try:
             # Find the latest activity end time (either landmarks or lunch)
             latest_end_time = lunch_end_time

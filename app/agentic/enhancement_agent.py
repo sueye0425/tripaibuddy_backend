@@ -1,43 +1,32 @@
 """
-Enhancement Agent for restaurant integration and landmark enhancement.
+Enhancement Agent for landmark enhancement only.
 Handles Google Places integration.
 """
 import logging
-import time
-from typing import Dict, List, Optional, Set, Any
+from typing import Dict, List, Optional
 
 from ..schema import StructuredDayPlan, ItineraryBlock, Location
 from ..places_client import GooglePlacesClient
-from .restaurant_system import RestaurantSystem
 
 logger = logging.getLogger(__name__)
 
 class EnhancementAgent:
-    """Agent responsible for restaurant integration and landmark enhancement"""
+    """Agent responsible for landmark enhancement only"""
     
     def __init__(self):
-        self.restaurant_system = RestaurantSystem()
+        pass
     
-    async def _enhance_day_with_restaurants(
+    async def enhance_day_with_landmarks(
         self, 
         day_plan: StructuredDayPlan, 
         places_client: GooglePlacesClient,
-        destination: str,
-        used_restaurants: set
+        destination: str
     ) -> StructuredDayPlan:
-        """Enhance a day with restaurant integration and landmark enhancement"""
-        
+        """Enhance a day with landmark enhancement only"""
         try:
-            # First enhance landmarks with Google Places data using the destination
+            # Enhance landmarks with Google Places data using the destination
             enhanced_landmarks_day = await self._enhance_landmarks_basic(day_plan, places_client, destination)
-            
-            # Then add restaurants
-            enhanced_with_restaurants = await self.restaurant_system.add_restaurants_to_day(
-                enhanced_landmarks_day, places_client, destination, used_restaurants
-            )
-            
-            return enhanced_with_restaurants
-            
+            return enhanced_landmarks_day
         except Exception as e:
             logger.error(f"❌ Day {day_plan.day} enhancement failed: {e}")
             return day_plan
@@ -101,10 +90,10 @@ class EnhancementAgent:
                         enhanced_block = block.model_copy()
                         if place_data.get('place_id'):
                             enhanced_block.place_id = place_data['place_id']
-                            
+                        
                         if place_data.get('rating'):
                             enhanced_block.rating = place_data['rating']
-                            
+                        
                         if 'geometry' in place_data and 'location' in place_data['geometry']:
                             enhanced_block.location = Location(
                                 lat=place_data['geometry']['location']['lat'],

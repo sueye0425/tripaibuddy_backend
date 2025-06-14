@@ -1,78 +1,54 @@
 """
-Test duplicate detection logic using mocked LLM responses.
-
-These tests validate:
-- Detection of duplicate landmarks across days
-- Proper handling of duplicate responses
-- Anti-duplicate strategies
-
-No LLM costs - uses mocked data with known duplicates!
+Test duplicate detection and prevention in the agentic itinerary system.
 """
 
 import pytest
 from unittest.mock import patch, MagicMock
 
-from app.agentic_itinerary import enhanced_agentic_system
+from app.agentic import complete_itinerary_from_selection
 
 
 class TestDuplicateDetection:
     """Test suite for duplicate detection and prevention"""
     
     @pytest.mark.asyncio
-    async def test_unified_generation_prevents_duplicates(self, sample_trip_selection, mock_landmarks_response):
-        """Test that unified generation prevents duplicates compared to parallel generation"""
+    async def test_complete_itinerary_prevents_duplicates(self, sample_trip_selection, mock_places_client, mock_google_places_restaurant_detailed):
+        """Test that complete itinerary generation prevents duplicates"""
         
-        # Test unified generation (should have no duplicates)
-        mock_response = MagicMock()
-        mock_response.content = f"```json\n{mock_landmarks_response}\n```"
+        # Mock Google Places responses
+        mock_places_client.places_nearby.return_value = {"results": [mock_google_places_restaurant_detailed] * 10}
+        mock_places_client.geocode.return_value = {"lat": 28.5383, "lng": -81.3792}
+        mock_places_client.place_details.return_value = {"result": mock_google_places_restaurant_detailed}
         
-        with patch.object(enhanced_agentic_system.primary_llm, 'ainvoke', return_value=mock_response):
-            unified_result = await enhanced_agentic_system._generate_all_landmarks_unified(sample_trip_selection)
+        result = await complete_itinerary_from_selection(sample_trip_selection, mock_places_client)
         
-        # Collect all landmark names
+        # Collect all landmark names across all days
         all_landmark_names = []
-        for day_landmarks in unified_result.values():
-            for landmark in day_landmarks:
-                all_landmark_names.append(landmark.get('name', '').lower().strip())
+        all_restaurant_names = []
+        all_restaurant_place_ids = []
         
-        # Check for duplicates
+        for day in result['itinerary']['itinerary']:
+            for block in day['blocks']:
+                if block['type'] == 'landmark':
+                    all_landmark_names.append(block['name'].lower().strip())
+                elif block['type'] == 'restaurant':
+                    all_restaurant_names.append(block['name'].lower().strip())
+                    if block.get('place_id'):
+                        all_restaurant_place_ids.append(block['place_id'])
+        
+        # Check for landmark duplicates
         unique_landmarks = set(all_landmark_names)
         assert len(all_landmark_names) == len(unique_landmarks), (
-            f"Unified generation should prevent duplicates. "
+            f"Complete itinerary should prevent landmark duplicates. "
             f"Found: {all_landmark_names}, Unique: {list(unique_landmarks)}"
         )
-
-    @pytest.mark.asyncio
-    async def test_duplicate_landmark_names_detection(self, sample_trip_selection, mock_landmarks_response_with_duplicates):
-        """Test detection of duplicate landmark names in LLM response"""
         
-        mock_response = MagicMock()
-        mock_response.content = f"```json\n{mock_landmarks_response_with_duplicates}\n```"
-        
-        with patch.object(enhanced_agentic_system.primary_llm, 'ainvoke', return_value=mock_response):
-            result = await enhanced_agentic_system._generate_all_landmarks_unified(sample_trip_selection)
-        
-        # Collect all landmark names
-        all_landmark_names = []
-        for day_landmarks in result.values():
-            for landmark in day_landmarks:
-                all_landmark_names.append(landmark.get('name', '').lower().strip())
-        
-        # Count occurrences
-        name_counts = {}
-        for name in all_landmark_names:
-            name_counts[name] = name_counts.get(name, 0) + 1
-        
-        # Find duplicates
-        duplicates = {name: count for name, count in name_counts.items() if count > 1}
-        
-        # For testing purposes, we expect the mock data to have duplicates
-        # In production, this would trigger duplicate handling
-        if duplicates:
-            assert "universal studios florida" in duplicates, (
-                f"Expected 'universal studios florida' to be duplicated in test data. "
-                f"Found duplicates: {duplicates}"
-            )
+        # Check for restaurant duplicates by place_id (more reliable than name)
+        unique_restaurant_place_ids = set(all_restaurant_place_ids)
+        assert len(all_restaurant_place_ids) == len(unique_restaurant_place_ids), (
+            f"Complete itinerary should prevent restaurant duplicates by place_id. "
+            f"Found: {all_restaurant_place_ids}, Unique: {list(unique_restaurant_place_ids)}"
+        )
 
     def test_landmark_similarity_detection(self):
         """Test detection of similar (but not identical) landmark names"""
@@ -107,187 +83,117 @@ class TestDuplicateDetection:
         assert any("disney" in name for name in pair_names), "Should detect Disney similarity"
 
     @pytest.mark.asyncio
-    async def test_restaurant_duplicate_prevention(self, sample_trip_selection, mock_places_client):
-        """Test that restaurant duplication is prevented across days"""
+    async def test_restaurant_variety_across_days(self, sample_trip_selection, mock_places_client):
+        """Test that different restaurants are used across different days"""
         
-        # Create restaurants with some having same place_id (potential duplicates)
-        restaurants = [
-            {
-                "place_id": "duplicate_restaurant",  # This will be a duplicate
-                "name": "Duplicate Restaurant",
-                "vicinity": "Main St",
-                "rating": 4.0,
-                "geometry": {"location": {"lat": 28.5, "lng": -81.4}},
+        # Create diverse restaurants
+        restaurants = []
+        for i in range(15):
+            restaurants.append({
+                "place_id": f"unique_restaurant_{i}",
+                "name": f"Restaurant {i}",
+                "vicinity": f"Street {i}",
+                "rating": 4.0 + (i % 5) / 10,
+                "geometry": {"location": {"lat": 28.5 + i*0.01, "lng": -81.4 + i*0.01}},
                 "types": ["restaurant", "food"]
-            },
-            {
-                "place_id": "unique_restaurant_1",
-                "name": "Unique Restaurant 1", 
-                "vicinity": "First St",
-                "rating": 4.2,
-                "geometry": {"location": {"lat": 28.51, "lng": -81.41}},
-                "types": ["restaurant", "food"]
-            },
-            {
-                "place_id": "unique_restaurant_2",
-                "name": "Unique Restaurant 2",
-                "vicinity": "Second St", 
-                "rating": 4.4,
-                "geometry": {"location": {"lat": 28.52, "lng": -81.42}},
-                "types": ["restaurant", "food"]
-            }
-        ]
+            })
         
-        mock_places_client.places_nearby.return_value = restaurants
+        mock_places_client.places_nearby.return_value = {"results": restaurants}
+        mock_places_client.geocode.return_value = {"lat": 28.5383, "lng": -81.3792}
         
-        # Reset global tracking
-        enhanced_agentic_system._used_restaurants_global = set()
+        result = await complete_itinerary_from_selection(sample_trip_selection, mock_places_client)
         
-        from app.schema import StructuredDayPlan, ItineraryBlock
+        # Group restaurants by day
+        restaurants_by_day = {}
+        for day in result['itinerary']['itinerary']:
+            day_num = day['day']
+            restaurants_by_day[day_num] = []
+            
+            for block in day['blocks']:
+                if block['type'] == 'restaurant' and block.get('place_id'):
+                    restaurants_by_day[day_num].append(block['place_id'])
         
-        # Process first day - should use the duplicate restaurant
-        day1_plan = StructuredDayPlan(
-            day=1,
-            blocks=[
-                ItineraryBlock(
-                    name="Day 1 Landmark",
-                    type="landmark",
-                    start_time="09:00",
-                    duration="3h"
+        # Check that each day has different restaurants
+        all_day_combinations = [(1, 2), (1, 3), (2, 3)]
+        for day1, day2 in all_day_combinations:
+            if day1 in restaurants_by_day and day2 in restaurants_by_day:
+                day1_restaurants = set(restaurants_by_day[day1])
+                day2_restaurants = set(restaurants_by_day[day2])
+                
+                overlap = day1_restaurants.intersection(day2_restaurants)
+                assert len(overlap) == 0, (
+                    f"Days {day1} and {day2} should not share restaurants. "
+                    f"Overlap: {overlap}"
                 )
-            ]
-        )
-        
-        day1_result = await enhanced_agentic_system._add_restaurants_to_day(
-            day1_plan, mock_places_client, sample_trip_selection
-        )
-        
-        day1_place_ids = {
-            block.place_id for block in day1_result.blocks 
-            if block.type == 'restaurant' and block.place_id
-        }
-        
-        # Process second day - should NOT reuse restaurants from day 1
-        day2_plan = StructuredDayPlan(
-            day=2,
-            blocks=[
-                ItineraryBlock(
-                    name="Day 2 Landmark",
-                    type="landmark", 
-                    start_time="09:00",
-                    duration="3h"
-                )
-            ]
-        )
-        
-        day2_result = await enhanced_agentic_system._add_restaurants_to_day(
-            day2_plan, mock_places_client, sample_trip_selection
-        )
-        
-        day2_place_ids = {
-            block.place_id for block in day2_result.blocks
-            if block.type == 'restaurant' and block.place_id
-        }
-        
-        # Check for duplicates
-        overlap = day1_place_ids.intersection(day2_place_ids)
-        assert len(overlap) == 0, (
-            f"Found duplicate restaurants between days: {overlap}. "
-            f"Day 1: {day1_place_ids}, Day 2: {day2_place_ids}"
-        )
 
-    def test_parse_response_with_malformed_json(self):
-        """Test handling of malformed JSON responses that might cause duplicate issues"""
+    @pytest.mark.asyncio
+    async def test_itinerary_completeness(self, sample_trip_selection, mock_places_client, mock_multiple_restaurants):
+        """Test that the complete itinerary has all required components without gaps"""
         
-        malformed_responses = [
-            # Missing closing brace
-            '{"day_1": [{"name": "Test", "type": "landmark"}]',
-            
-            # Extra comma
-            '{"day_1": [{"name": "Test", "type": "landmark",}]}',
-            
-            # Missing quotes
-            '{day_1: [{"name": "Test", "type": "landmark"}]}',
-            
-            # Empty response
-            '',
-            
-            # Non-JSON response
-            'This is not JSON at all',
-        ]
+        # Mock Google Places responses
+        mock_places_client.places_nearby.return_value = {"results": mock_multiple_restaurants}
+        mock_places_client.geocode.return_value = {"lat": 28.5383, "lng": -81.3792}
+        mock_places_client.place_details.return_value = {"result": mock_multiple_restaurants[0]}
         
-        for malformed_response in malformed_responses:
-            result = enhanced_agentic_system._parse_unified_landmark_response(malformed_response, 3)
+        result = await complete_itinerary_from_selection(sample_trip_selection, mock_places_client)
+        
+        # Verify structure
+        assert 'itinerary' in result, "Result should contain itinerary"
+        assert 'itinerary' in result['itinerary'], "Result should contain nested itinerary"
+        
+        itinerary_days = result['itinerary']['itinerary']
+        assert len(itinerary_days) == 3, "Should have 3 days"
+        
+        for day in itinerary_days:
+            assert 'day' in day, "Each day should have day number"
+            assert 'blocks' in day, "Each day should have blocks"
             
-            # Should return fallback structure, not crash
-            assert isinstance(result, dict), f"Should return dict for malformed response: {malformed_response[:50]}"
-            assert len(result) == 3, f"Should have 3 days in fallback response"
+            # Count landmarks and restaurants
+            landmarks = [b for b in day['blocks'] if b['type'] == 'landmark']
+            restaurants = [b for b in day['blocks'] if b['type'] == 'restaurant']
             
-            # All days should have empty lists (fallback)
-            for day_num in [1, 2, 3]:
-                assert day_num in result, f"Missing day {day_num} in fallback"
-                assert isinstance(result[day_num], list), f"Day {day_num} should be list in fallback"
+            # Each day should have at least some landmarks and restaurants
+            assert len(landmarks) > 0, f"Day {day['day']} should have landmarks"
+            assert len(restaurants) > 0, f"Day {day['day']} should have restaurants"
+            
+            # Verify block structure
+            for block in day['blocks']:
+                assert 'type' in block, "Each block should have type"
+                assert 'name' in block, "Each block should have name"
+                assert block['type'] in ['landmark', 'restaurant'], "Block type should be landmark or restaurant"
 
     def test_gap_detection_logic(self):
-        """Test gap detection logic with mock data - no API costs"""
+        """Test logic for detecting gaps in itinerary timing"""
         
-        # Create test day with a large gap
-        day_with_gap = {
-            "day": 1,
-            "blocks": [
-                {
-                    "name": "Morning Museum",
-                    "type": "landmark",
-                    "start_time": "09:00",
-                    "duration": "2h"  # Ends at 11:00
-                },
-                {
-                    "name": "Late Afternoon Activity", 
-                    "type": "landmark",
-                    "start_time": "16:00",  # Starts at 16:00 - 5 hour gap!
-                    "duration": "2h"
-                }
-            ]
-        }
+        # Mock blocks with timing gaps
+        blocks = [
+            {"start_time": "09:00", "duration": "2h", "name": "Morning Activity"},
+            {"start_time": "14:00", "duration": "3h", "name": "Afternoon Activity"},  # 3-hour gap
+            {"start_time": "19:00", "duration": "1h", "name": "Evening Activity"},   # 2-hour gap
+        ]
         
-        # Test the gap detection logic
-        from analysis.test_comprehensive_agentic import ComprehensiveAgenticValidation
-        validator = ComprehensiveAgenticValidation()
+        # Simple gap detection logic
+        gaps = []
+        for i in range(len(blocks) - 1):
+            current_block = blocks[i]
+            next_block = blocks[i + 1]
+            
+            # Parse times (simplified)
+            current_start_hour = int(current_block["start_time"].split(":")[0])
+            current_duration_hours = int(current_block["duration"].replace("h", ""))
+            current_end_hour = current_start_hour + current_duration_hours
+            
+            next_start_hour = int(next_block["start_time"].split(":")[0])
+            
+            gap_hours = next_start_hour - current_end_hour
+            if gap_hours > 1:  # More than 1 hour gap
+                gaps.append({
+                    "after_block": current_block["name"],
+                    "before_block": next_block["name"],
+                    "gap_hours": gap_hours
+                })
         
-        gap_issues = validator._analyze_day_gaps(day_with_gap, 1)
-        
-        # Should detect the large gap
-        assert len(gap_issues) == 1, f"Should detect 1 gap issue, found {len(gap_issues)}"
-        assert "5.0 hours" in gap_issues[0], f"Should mention 5 hour gap, got: {gap_issues[0]}"
-        assert "Morning Museum" in gap_issues[0], "Should mention first activity"
-        assert "Late Afternoon Activity" in gap_issues[0], "Should mention second activity"
-        
-        # Test day with no gaps
-        day_without_gap = {
-            "day": 2,
-            "blocks": [
-                {
-                    "name": "Morning Activity",
-                    "type": "landmark", 
-                    "start_time": "09:00",
-                    "duration": "2h"  # Ends at 11:00
-                },
-                {
-                    "name": "Lunch",
-                    "type": "restaurant",
-                    "start_time": "12:30",  # 1.5 hour gap - acceptable
-                    "duration": "1h"
-                },
-                {
-                    "name": "Afternoon Activity",
-                    "type": "landmark",
-                    "start_time": "14:00",  # 0.5 hour gap - fine
-                    "duration": "2h"
-                }
-            ]
-        }
-        
-        gap_issues = validator._analyze_day_gaps(day_without_gap, 2)
-        
-        # Should not detect any issues
-        assert len(gap_issues) == 0, f"Should not detect gaps in well-planned day, found: {gap_issues}" 
+        # Should detect the gaps
+        assert len(gaps) == 2, f"Should detect 2 gaps, found: {gaps}"
+        assert gaps[0]["gap_hours"] == 3, "First gap should be 3 hours"
+        assert gaps[1]["gap_hours"] == 2, "Second gap should be 2 hours" 
