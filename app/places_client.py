@@ -9,6 +9,7 @@ import json
 import asyncio # Added asyncio for TimeoutError
 from dateutil import parser as date_parser
 from .routes_client import GoogleRoutesClient # Ensure this is the new async version
+from .redis_client import RedisClient
 
 class RateLimit:
     def __init__(self, limit: int, window: int):
@@ -34,8 +35,8 @@ class RateLimit:
         return False
 
 class RedisCache:
-    def __init__(self, redis_url: str):
-        self.redis_url = redis_url
+    def __init__(self, redis_client: Optional[RedisClient] = None):
+        self.redis_client = redis_client or RedisClient()
         self.client: Optional[aioredis.Redis] = None # Updated type hint
         # 🎯 COST OPTIMIZATION: Longer TTLs to improve cache hit rates and reduce API costs
         self.ttl = {
@@ -45,22 +46,6 @@ class RedisCache:
             'image_proxy': 30 * 24 * 60 * 60 # 30 days for proxied images (very stable)
         }
         self.logger = logging.getLogger(__name__)
-
-    async def get_client(self) -> aioredis.Redis:
-        if self.client is None:
-            # Use redis.asyncio.from_url with optimized settings
-            self.client = aioredis.from_url(
-                self.redis_url,
-                encoding="utf-8",
-                decode_responses=False,
-                retry_on_timeout=True,
-                socket_timeout=2,  # Reduce timeout to fail fast
-                socket_connect_timeout=2,
-                socket_keepalive=True,
-                health_check_interval=30,
-                max_connections=10  # Limit connections to prevent overwhelming Redis
-            )
-        return self.client
 
     def get_key(self, key_type: str, **kwargs) -> str:
         # Use a more efficient cache key format
@@ -90,48 +75,40 @@ class RedisCache:
         return ":".join(key_parts)
 
     async def get(self, key: str) -> Optional[Any]:
-        client = await self.get_client()
-        try:
-            # Add timeout to Redis get operation
-            data = await asyncio.wait_for(
-                client.get(key),
-                timeout=2.0  # 2 second timeout
-            )
-            
-            if not data:
-                return None
-                
-            # If key starts with image_proxy prefix, return raw bytes
-            if key.startswith(f"{self.get_key('image_proxy', photoreference='').split(':')[0]}:img"):
-                self.logger.info(f"Retrieved image from cache for key: {key}")
-                return data
-                
-            # For other data types, try to decode JSON
-            try:
-                return json.loads(data.decode('utf-8'))
-            except (UnicodeDecodeError, json.JSONDecodeError) as e:
-                self.logger.error(f"Error decoding data for key {key}: {str(e)}")
-                return None
-                
-        except asyncio.TimeoutError:
-            self.logger.warning(f"Redis get timeout for key {key}")
+        """Get value from cache using RedisClient"""
+        data = await self.redis_client.get(key)
+        
+        if not data:
             return None
-        except Exception as e:
-            self.logger.error(f"Redis get error for key {key}: {str(e)}")
+            
+        # If key starts with image_proxy prefix, return raw bytes
+        if key.startswith(f"{self.get_key('image_proxy', photoreference='').split(':')[0]}:img"):
+            self.logger.debug(f"Retrieved image from cache for key: {key}")
+            return data
+            
+        # For other data types, try to decode JSON
+        try:
+            return json.loads(data.decode('utf-8'))
+        except (UnicodeDecodeError, json.JSONDecodeError) as e:
+            self.logger.error(f"Error decoding data for key {key}: {str(e)}")
             return None
 
     async def set(self, key: str, value: Any, ttl_type: str):
-        client = await self.get_client()
-        try:
-            # Add timeout to Redis set operation
-            await asyncio.wait_for(
-                self._do_set(client, key, value, ttl_type),
-                timeout=2.0  # 2 second timeout
-            )
-        except asyncio.TimeoutError:
-            self.logger.warning(f"Redis set timeout for key {key}")
-        except Exception as e:
-            self.logger.error(f"Redis set error for key {key}: {str(e)}")
+        """Set value to cache using RedisClient"""
+        # Handle binary data for images
+        if ttl_type == 'image_proxy':
+            if not isinstance(value, bytes):
+                self.logger.error(f"Image proxy value must be bytes, got {type(value)}")
+                return
+            data_to_store = value
+        else:
+            # For non-image data, store as JSON
+            data_to_store = json.dumps(value).encode('utf-8') if isinstance(value, (dict, list)) else str(value).encode('utf-8')
+
+        # Get TTL value, default to 1 hour if not found
+        ttl = self.ttl.get(ttl_type, 3600)
+        await self.redis_client.set(key, data_to_store, ttl)
+        self.logger.debug(f"Successfully stored data in cache with key: {key}, ttl_type: {ttl_type}")
 
     async def _do_set(self, client: aioredis.Redis, key: str, value: Any, ttl_type: str):
         """Helper method to perform the actual Redis set operation"""
@@ -150,15 +127,8 @@ class RedisCache:
         await client.setex(key, ttl, data_to_store)
         self.logger.debug(f"Successfully stored data in cache with key: {key}, ttl_type: {ttl_type}")
 
-    async def close(self):
-        if self.client:
-            await self.client.close()
-            await self.client.connection_pool.disconnect() # Ensure pool is disconnected
-            self.client = None
-            self.logger.info("Redis connection and pool closed.")
-
 class GooglePlacesClient:
-    def __init__(self, session: aiohttp.ClientSession):
+    def __init__(self, session: aiohttp.ClientSession, redis_client: Optional[RedisClient] = None):
         self.api_key = os.getenv('GOOGLE_PLACES_API_KEY')
         # Initialize GoogleRoutesClient with the same session
         self.routes_client = GoogleRoutesClient(session=session)
@@ -167,7 +137,7 @@ class GooglePlacesClient:
             'place_details': RateLimit(600, 60),
             'photos': RateLimit(600, 60)
         }
-        self.cache = RedisCache(os.getenv('REDIS_URL'))
+        self.cache = RedisCache(redis_client)
         self.logger = logging.getLogger(__name__)
         self._session = session # This client also uses the passed-in session
         # self._should_close_session should be False if session is always passed in via lifespan
@@ -749,9 +719,8 @@ class GooglePlacesClient:
         # Close RedisCache and GoogleRoutesClient
         # GoogleRoutesClient.close() is currently a pass-through, as its session is managed externally.
         # If GoogleRoutesClient had other resources, its close method would handle them.
-        await self.cache.close()
         await self.routes_client.close() # This will call the new async close in GoogleRoutesClient
-        self.logger.info("RedisCache and GoogleRoutesClient connections managed for closure by GooglePlacesClient.")
+        self.logger.info("GoogleRoutesClient connections managed for closure by GooglePlacesClient.")
 
     async def get_photo_url(self, photo_reference: str, max_width: int = 400, max_height: int = 400) -> Optional[str]:
         """Get photo URL from Google Places Photo API"""

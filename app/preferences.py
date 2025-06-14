@@ -9,7 +9,8 @@ class PreferencesParser:
         self.client = OpenAI(
             api_key=os.getenv('OPENAI_API_KEY'),
             timeout=30.0,
-            max_retries=2
+            max_retries=2,
+            **({"base_url": os.getenv("OPENAI_BASE_URL")} if os.getenv("OPENAI_BASE_URL") else {})  # Use base_url if set, otherwise use
         )
         self.logger = logging.getLogger(__name__)
 

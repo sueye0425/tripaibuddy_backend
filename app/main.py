@@ -14,6 +14,8 @@ from .complete_itinerary import complete_itinerary_from_selection
 from .schema import LandmarkSelection, StructuredItinerary, StructuredDayPlan, ItineraryBlock, Location, CompleteItineraryResponse
 from .recommendations import RecommendationGenerator
 from .places_client import GooglePlacesClient
+from .redis_client import redis_client
+from decorators.rate_limit import rate_limit
 
 # Configure logging
 logging.basicConfig(
@@ -31,11 +33,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     client_session = None
     try:
         client_session = aiohttp.ClientSession()
-        places_client = GooglePlacesClient(session=client_session)
+        places_client = GooglePlacesClient(session=client_session, redis_client=redis_client)
         recommendation_generator = RecommendationGenerator(places_client=places_client)
         
         app_state["client_session"] = client_session
         app_state["places_client"] = places_client
+        app_state["redis_client"] = redis_client
         app_state["recommendation_generator"] = recommendation_generator
         
         logging.info("Application lifespan: Startup sequence completed. Clients initialized.")
@@ -52,6 +55,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             except Exception as e:
                 logging.exception("Application lifespan: Error closing GooglePlacesClient.")
         
+        if "redis_client" in app_state and app_state["redis_client"]:
+            # Close Redis client
+            try:
+                await app_state["redis_client"].close()
+                logging.info("Application lifespan: Redis client closed.")
+            except Exception as e:
+                logging.exception("Application lifespan: Error closing Redis client.")
+                
         if client_session and not client_session.closed:
             try:
                 await client_session.close()
@@ -461,6 +472,7 @@ def _simple_conversion_fallback(old_format_result: Dict[str, Any], travel_days: 
     return {"itinerary": itinerary_days}
 
 @app.post("/generate")
+@rate_limit(endpoint="generate", limit=50)
 async def generate(request: ItineraryRequest):
     try:
         logging.info(f"🎯 Generate endpoint called for destination: {request.destination}")
@@ -498,6 +510,7 @@ async def generate(request: ItineraryRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/complete-itinerary", response_model=CompleteItineraryResponse)
+@rate_limit(endpoint="complete_itinerary", limit=50)
 async def complete_itinerary(data: LandmarkSelection):
     try:
         logging.info(f"Received complete-itinerary request: {data.model_dump()}")
@@ -567,7 +580,7 @@ async def image_proxy(photoreference: str, maxwidth: int = 800, maxheight: Optio
         # Try to get from cache with a short timeout
         try:
             cached_image = await asyncio.wait_for(
-                redis_client.get(cache_key),
+                places_client.cache.redis_client.get(cache_key),
                 timeout=1.0  # 1 second timeout for cache
             )
             if cached_image:
@@ -603,10 +616,10 @@ async def image_proxy(photoreference: str, maxwidth: int = 800, maxheight: Optio
                     try:
                         # Try to cache but don't wait too long
                         await asyncio.wait_for(
-                            redis_client.setex(
+                            places_client.cache.redis_client.set(
                                 cache_key,
-                                places_client.cache.ttl['image_proxy'],
-                                img_data
+                                img_data,
+                                places_client.cache.ttl['image_proxy']
                             ),
                             timeout=1.0  # 1 second timeout for cache set
                         )
@@ -647,7 +660,7 @@ async def health_check():
     return {"status": "healthy"}
 
 @app.get("/")
-def home():
+async def home():
     return {
         "message": "🎒 Welcome to TripAIBuddy API!",
         "docs_url": "/docs",

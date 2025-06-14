@@ -21,6 +21,7 @@ load_dotenv()
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 PINECONE_API_KEY = os.getenv("PINECONE_API_KEY")
 INDEX_NAME = os.getenv("INDEX_NAME")
+OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL")
 
 if not OPENAI_API_KEY:
     raise ValueError("OPENAI_API_KEY environment variable is not set")
@@ -34,7 +35,8 @@ try:
     client = OpenAI(
         api_key=OPENAI_API_KEY,
         timeout=30.0,  # 30 second timeout
-        max_retries=2  # Only retry twice
+        max_retries=2,  # Only retry twice
+        **({"base_url": OPENAI_BASE_URL} if OPENAI_BASE_URL else {})  # Use base_url if set, otherwise use default
     )
     pc = Pinecone(api_key=PINECONE_API_KEY)
     index = pc.Index(INDEX_NAME)
@@ -42,7 +44,8 @@ try:
         openai_api_key=OPENAI_API_KEY,
         model_name="gpt-4-turbo",
         temperature=0.5,
-        request_timeout=30  # 30 second timeout
+        request_timeout=30,  # 30 second timeout
+        **({"base_url": OPENAI_BASE_URL} if OPENAI_BASE_URL else {})  # Use base_url if set, otherwise use default
     )
     print("✅ Successfully initialized all API clients")
 except Exception as e:
