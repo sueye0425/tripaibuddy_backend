@@ -154,8 +154,8 @@ class ItineraryRequest(BaseModel):
         
         raise ValueError('Either travel_days or both start_date and end_date must be provided')
 
-@rate_limit(endpoint="generate", limit=50)
 @app.post("/generate")
+@rate_limit(endpoint="generate", limit=50)
 async def generate(request: ItineraryRequest):
     try:
         recommendation_generator = app_state["recommendation_generator"]
@@ -181,8 +181,8 @@ async def generate(request: ItineraryRequest):
         logging.exception("Error during /generate")
         raise HTTPException(status_code=500, detail=str(e))
 
-@rate_limit(endpoint="complete_itinerary", limit=50)
 @app.post("/complete-itinerary", response_model=StructuredItinerary)
+@rate_limit(endpoint="complete_itinerary", limit=50)
 async def complete_itinerary(data: LandmarkSelection):
     try:
         logging.info(f"Received complete-itinerary request: {data.model_dump()}")
