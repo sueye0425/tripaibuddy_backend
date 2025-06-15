@@ -294,4 +294,74 @@ def expected_itinerary_structure():
         "required_meal_types": {"breakfast", "lunch", "dinner"},
         "landmark_types": {"landmark"},
         "restaurant_types": {"restaurant"}
-    } 
+    }
+
+@pytest.fixture
+def mock_places_client_cost_optimized():
+    """Cost-optimized mock Google Places client that minimizes API calls"""
+    mock = AsyncMock()
+    
+    # Track API calls for cost analysis
+    mock.api_call_count = {
+        'geocoding': 0,
+        'nearby_search': 0,
+        'place_details': 0
+    }
+    
+    # Mock geocoding with tracking
+    async def mock_geocode(destination):
+        mock.api_call_count['geocoding'] += 1
+        return {"lat": 28.5383, "lng": -81.3792}
+    
+    # Mock nearby search with rich data to avoid place_details calls
+    async def mock_places_nearby(**kwargs):
+        mock.api_call_count['nearby_search'] += 1
+        return {
+            "results": [
+                {
+                    "place_id": f"mock_restaurant_{i}",
+                    "name": f"Test Restaurant {i}",
+                    "vicinity": f"123 Test St {i}, Orlando, FL",
+                    "formatted_address": f"123 Test St {i}, Orlando, FL 32819, USA",
+                    "rating": 4.0 + (i % 5) / 10,
+                    "geometry": {"location": {"lat": 28.5 + i*0.01, "lng": -81.4 + i*0.01}},
+                    "types": ["restaurant", "food", "establishment"],
+                    "price_level": 2,
+                    "user_ratings_total": 100 + i * 50,
+                    "photos": [{"photo_reference": f"photo_ref_{i}"}],
+                    "website": f"https://restaurant{i}.com",
+                    # Rich description data to avoid place_details calls
+                    "editorial_summary": {"overview": f"Popular local restaurant serving delicious food"},
+                    "reviews": [
+                        {
+                            "rating": 5,
+                            "text": f"Great {kwargs.get('keyword', 'food')} restaurant with excellent service"
+                        }
+                    ]
+                }
+                for i in range(20)  # Provide plenty of options
+            ]
+        }
+    
+    # Mock place_details with tracking (should be minimized)
+    async def mock_place_details(place_id, **kwargs):
+        mock.api_call_count['place_details'] += 1
+        return {
+            "result": {
+                "place_id": place_id,
+                "name": f"Detailed Restaurant",
+                "formatted_address": "123 Detailed St, Orlando, FL 32819, USA",
+                "rating": 4.5,
+                "geometry": {"location": {"lat": 28.5383, "lng": -81.3792}},
+                "types": ["restaurant", "food"],
+                "website": "https://detailed-restaurant.com",
+                "editorial_summary": {"overview": "Excellent restaurant with detailed information"},
+                "reviews": [{"rating": 5, "text": "Amazing food and service"}]
+            }
+        }
+    
+    mock.geocode = mock_geocode
+    mock.places_nearby = mock_places_nearby
+    mock.place_details = mock_place_details
+    
+    return mock 

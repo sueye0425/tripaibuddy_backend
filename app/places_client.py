@@ -82,7 +82,7 @@ class RedisCache:
             return None
             
         # If key starts with image_proxy prefix, return raw bytes
-        if key.startswith(f"{self.get_key('image_proxy', photoreference='').split(':')[0]}:img"):
+        if key.startswith('image_proxy:'):
             self.logger.debug(f"Retrieved image from cache for key: {key}")
             return data
             
@@ -343,10 +343,10 @@ class GooglePlacesClient:
             # Calculate search radius based on location
             radius = await self.calculate_radius(location)
             
-            # For restaurants, try multiple search strategies
-            if place_type == 'restaurant' and keywords:
+            # For restaurants, use specialized search regardless of keywords
+            if place_type == 'restaurant':
                 detailed_results = await self._search_restaurants_with_fallback(
-                    location, radius, keywords, max_results, special_requests
+                    location, radius, keywords or [], max_results, special_requests
                 )
             else:
                 # For non-restaurant searches, use the cost-optimized approach
@@ -416,9 +416,12 @@ class GooglePlacesClient:
                 high_priority_places.sort(key=lambda x: x.get('_priority_score', 0), reverse=True)
                 
                 # 🎯 COST REDUCTION: Limit place details calls based on type
-                if place_type in ['tourist_attraction', 'museum', 'park']:
-                    # For landmarks, limit to top 3 results to reduce costs
-                    places_to_detail = min(3, max_results, len(high_priority_places))
+                if place_type in ['tourist_attraction', 'museum', 'park', 'amusement_park', 'art_gallery', 'zoo', 'aquarium']:
+                    # For landmarks, get more results per type to create a larger pool for popularity ranking
+                    places_to_detail = min(12, max_results, len(high_priority_places))
+                elif place_type == 'restaurant':
+                    # For restaurants, allow up to 10 results
+                    places_to_detail = min(10, max_results, len(high_priority_places))
                 else:
                     # For other types, limit to top 5
                     places_to_detail = min(5, max_results, len(high_priority_places))
@@ -466,56 +469,24 @@ class GooglePlacesClient:
         max_results: int,
         special_requests: Optional[str]
     ) -> List[Dict[str, Any]]:
-        """Search for restaurants with multiple fallback strategies."""
+        """Simple restaurant search to avoid timeouts."""
         
-        # Strategy 1: Try with the primary cuisine type only (most specific)
-        if keywords and any('chinese' in kw.lower() for kw in keywords):
-            primary_keyword = 'chinese'
-        else:
-            primary_keyword = keywords[0] if keywords else None
-            
-        if primary_keyword:
-            self.logger.info(f"Restaurant search strategy 1: Using primary keyword '{primary_keyword}'")
-            results = await self.places_nearby(
-                location=location,
-                radius=radius,
-                place_type='restaurant',
-                keyword=primary_keyword
-            )
-            
-            if results.get('results'):
-                self.logger.info(f"Strategy 1 found {len(results['results'])} restaurants")
-                # 🎯 COST OPTIMIZATION: Limit restaurant details calls
-                return await self._get_restaurant_details_optimized(results['results'], max_results)
+        # Just do one search call to avoid hanging
+        self.logger.info(f"🍽️ Simple restaurant search for {max_results} restaurants")
         
-        # Strategy 2: Try without any keywords (broader search) - but only if strategy 1 failed
-        self.logger.info("Restaurant search strategy 2: Searching all restaurants without keywords")
         results = await self.places_nearby(
             location=location,
             radius=radius,
             place_type='restaurant',
-            keyword=None
+            keyword=None  # No keyword for broader results
         )
         
         if results.get('results'):
-            self.logger.info(f"Strategy 2 found {len(results['results'])} restaurants")
-            return await self._get_restaurant_details_optimized(results['results'], max_results)
+            self.logger.info(f"Found {len(results['results'])} restaurants from Google Places API")
+            detailed_restaurants = await self._get_restaurant_details_optimized(results['results'], max_results)
+            self.logger.info(f"Returning {len(detailed_restaurants)} detailed restaurants")
+            return detailed_restaurants
         
-        # Strategy 3: Increase radius and try again - only as last resort
-        larger_radius = min(radius * 2, 50000)  # Double radius, max 50km
-        self.logger.info(f"Restaurant search strategy 3: Increasing radius to {larger_radius}m")
-        results = await self.places_nearby(
-            location=location,
-            radius=larger_radius,
-            place_type='restaurant',
-            keyword=None
-        )
-        
-        if results.get('results'):
-            self.logger.info(f"Strategy 3 found {len(results['results'])} restaurants")
-            return await self._get_restaurant_details_optimized(results['results'], max_results)
-        
-        self.logger.warning("All restaurant search strategies failed")
         return []
 
     async def _get_restaurant_details_optimized(self, restaurant_results: List[Dict], max_results: int) -> List[Dict[str, Any]]:
@@ -525,7 +496,24 @@ class GooglePlacesClient:
         # Score and prioritize restaurants before fetching expensive details
         
         scored_restaurants = []
+        hotel_restaurants_filtered = 0
         for place in restaurant_results:
+            # Skip hotel restaurants and other non-restaurant establishments
+            place_types = place.get('types', [])
+            place_name_lower = place.get('name', '').lower()
+            
+            # Check for lodging/hotel types
+            if 'lodging' in place_types or 'hotel' in place_types:
+                hotel_restaurants_filtered += 1
+                self.logger.debug(f"Skipping hotel restaurant: {place.get('name')}")
+                continue
+            
+            # Check for club/athletic establishments that might not be proper restaurants
+            if ('club' in place_name_lower and ('athletic' in place_name_lower or 'country' in place_name_lower or 'golf' in place_name_lower)):
+                hotel_restaurants_filtered += 1
+                self.logger.debug(f"Skipping club establishment: {place.get('name')}")
+                continue
+            
             score = 0
             
             # Prioritize by rating
@@ -573,8 +561,10 @@ class GooglePlacesClient:
         # Sort by score and limit to reduce API costs
         scored_restaurants.sort(key=lambda x: x.get('_score', 0), reverse=True)
         
-        # 🎯 COST REDUCTION: Limit restaurant details to top candidates
-        # 💰 FURTHER COST OPTIMIZATION: Reduce from 12 to 10 restaurant details for additional savings
+        self.logger.info(f"Restaurant filtering: {len(restaurant_results)} total → {hotel_restaurants_filtered} hotel restaurants filtered → {len(scored_restaurants)} remaining")
+        
+        # 💰 COST OPTIMIZATION: Restaurant limit increased to 10 per user request
+        # Previous limit was 10, keeping same for now to assess cost impact
         cost_optimized_limit = min(10, max_results, len(scored_restaurants))
         self.logger.info(f"💰 Restaurant cost optimization: Fetching details for top {cost_optimized_limit} out of {len(scored_restaurants)} restaurants")
         

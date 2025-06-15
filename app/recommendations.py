@@ -314,7 +314,7 @@ class RecommendationGenerator:
                         location=location,
                         place_type=config['type'],
                         keywords=current_keywords if current_keywords else None, # Pass None if no keywords
-                        max_results=3  # 🎯 COST REDUCTION: Reduced from 5 to 3 per type
+                        max_results=12  # Get more results per type to have a larger pool for popularity ranking
                     )
                 )
             
@@ -339,7 +339,7 @@ class RecommendationGenerator:
                 location=location,
                 place_type='restaurant',
                 keywords=simplified_keywords if simplified_keywords else None,
-                max_results=10,  # 💰 FURTHER COST OPTIMIZATION: Reduced from 12 to 10 for additional savings
+                max_results=20,  # 💰 Increased from 10 to 20 to get more restaurant options
                 special_requests=special_requests  # Pass special_requests to affect caching
             )
             
@@ -353,7 +353,7 @@ class RecommendationGenerator:
                 
                 # Then get landmarks in parallel, but limit concurrent requests
                 landmark_results = await asyncio.wait_for(
-                    asyncio.gather(*landmark_tasks[:10], return_exceptions=True),  # Limit to top 10 landmark tasks
+                    asyncio.gather(*landmark_tasks, return_exceptions=True),  # Use all landmark tasks
                     timeout=5  # 5 seconds timeout for landmarks
                 )
                 
@@ -468,32 +468,35 @@ class RecommendationGenerator:
                     restaurants = sorted_restaurants
                     self.logger.info(f"Successfully processed {len(restaurants)} restaurants.")
 
-            # --- Start: New Popularity Ranking Logic for Landmarks ---
+            # --- Start: Enhanced Popularity Ranking Logic for Landmarks ---
             if landmarks:
                 # Convert landmarks dict to a list for sorting
                 landmark_list = list(landmarks.values())
-
-                # Sort by user_ratings_total (descending) then by rating (descending)
-                # Places with more reviews are generally more popular/well-known.
-                landmark_list.sort(key=lambda x: (int(x.get('user_ratings_total', 0)), float(x.get('rating', 0.0))), reverse=True)
                 
-                # Optional: Filter out places with very few ratings, adjust threshold as needed
-                # For example, for major destinations, a higher threshold might be appropriate.
-                # This can be made dynamic based on destination type or population later.
-                min_ratings_threshold = 50 # Example threshold
-                # landmark_list = [lm for lm in landmark_list if int(lm.get('user_ratings_total', 0)) >= min_ratings_threshold]
-
-                # 💰 COST OPTIMIZATION: Limit to top quality places for better cost efficiency
-                # Reduce from 15 to 12 landmarks to save API costs
-                max_ranked_landmarks = 12
+                # Calculate popularity score for each landmark
+                for landmark in landmark_list:
+                    popularity_score = self._calculate_landmark_popularity_score(landmark)
+                    landmark['_popularity_score'] = popularity_score
+                
+                # Sort by popularity score (descending)
+                landmark_list.sort(key=lambda x: x.get('_popularity_score', 0), reverse=True)
+                
+                # Log top landmarks for debugging
+                self.logger.info(f"Top 5 most popular landmarks by score:")
+                for i, landmark in enumerate(landmark_list[:5]):
+                    score = landmark.get('_popularity_score', 0)
+                    reviews = landmark.get('user_ratings_total', 0)
+                    rating = landmark.get('rating', 0)
+                    self.logger.info(f"  {i+1}. {landmark.get('name')} - Score: {score:.1f} (Reviews: {reviews}, Rating: {rating})")
+                
+                # Select top 15 most popular landmarks
+                max_ranked_landmarks = 15
                 ranked_landmarks_list = landmark_list[:max_ranked_landmarks]
                 
-                # Convert back to a dictionary if the original structure is strictly needed,
-                # otherwise, a sorted list might be better for the frontend.
-                # For now, let's recreate the dictionary for consistency with the previous structure.
+                # Convert back to a dictionary for consistency
                 landmarks = {lm['name']: lm for lm in ranked_landmarks_list}
-                self.logger.info(f"Ranked and trimmed landmarks. Returning top {len(landmarks)}.")
-            # --- End: New Popularity Ranking Logic for Landmarks ---
+                self.logger.info(f"Selected top {len(landmarks)} most popular landmarks from {len(landmark_list)} total.")
+            # --- End: Enhanced Popularity Ranking Logic for Landmarks ---
 
             self.logger.info(f"Found {len(landmarks)} landmarks and {len(restaurants)} restaurants after ranking/trimming.")
             
@@ -581,6 +584,68 @@ class RecommendationGenerator:
                 "landmarks": {},
                 "restaurants": {}
             } 
+
+    def _calculate_landmark_popularity_score(self, landmark: Dict[str, Any]) -> float:
+        """Calculate popularity score for a landmark based on reviews, rating, and other factors."""
+        try:
+            # Base metrics
+            rating = float(landmark.get('rating', 0.0))
+            review_count = int(landmark.get('user_ratings_total', 0))
+            
+            # Base score from rating (0-5 scale, multiply by 20 to get 0-100)
+            rating_score = rating * 20
+            
+            # Review count score (logarithmic scale to handle wide range)
+            # Popular landmarks can have 10k+ reviews, while smaller ones have 100-1000
+            if review_count > 0:
+                import math
+                # Use log scale: 100 reviews = 40 points, 1000 reviews = 60 points, 10000 reviews = 80 points
+                review_score = min(80, 20 * math.log10(review_count))
+            else:
+                review_score = 0
+            
+            # Bonus for very highly rated places (4.5+ rating)
+            high_rating_bonus = 0
+            if rating >= 4.7:
+                high_rating_bonus = 15
+            elif rating >= 4.5:
+                high_rating_bonus = 10
+            elif rating >= 4.0:
+                high_rating_bonus = 5
+            
+            # Bonus for very popular places (lots of reviews)
+            popularity_bonus = 0
+            if review_count >= 10000:
+                popularity_bonus = 20  # Major landmark
+            elif review_count >= 5000:
+                popularity_bonus = 15  # Very popular
+            elif review_count >= 2000:
+                popularity_bonus = 10  # Popular
+            elif review_count >= 1000:
+                popularity_bonus = 5   # Well-known
+            
+            # Penalty for places with very few reviews (might be new or not well-known)
+            low_review_penalty = 0
+            if review_count < 50:
+                low_review_penalty = -20
+            elif review_count < 100:
+                low_review_penalty = -10
+            
+            # Calculate final score
+            final_score = rating_score + review_score + high_rating_bonus + popularity_bonus + low_review_penalty
+            
+            # Ensure score is non-negative
+            final_score = max(0, final_score)
+            
+            self.logger.debug(f"Landmark {landmark.get('name')} popularity score: {final_score:.1f} "
+                            f"(rating: {rating_score:.1f}, reviews: {review_score:.1f}, "
+                            f"bonuses: {high_rating_bonus + popularity_bonus}, penalty: {low_review_penalty})")
+            
+            return final_score
+            
+        except Exception as e:
+            self.logger.error(f"Error calculating landmark popularity score: {str(e)}")
+            return 0.0
 
     def _calculate_restaurant_priority(self, place: Dict[str, Any], cuisine_preferences: List[str]) -> float:
         """Calculate priority score for a restaurant based on ratings and preferences."""

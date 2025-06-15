@@ -4,6 +4,7 @@ import hashlib
 import json
 import asyncio
 import logging
+import random
 from dotenv import load_dotenv
 from typing import Dict, List, Any, Optional, Tuple
 from datetime import datetime, timedelta
@@ -110,11 +111,16 @@ SELECTED ATTRACTIONS (REQUIRED):
 REQUIREMENTS:
 • Include ALL selected attractions as provided
 • Add 1-2 additional landmarks per day for full experience
-• Use realistic durations: Viewpoint(45min), Museum(2h), Theme Park(6h)
+• Choose MAIN LANDMARKS, not sub-attractions (e.g., "ICON Park" not "The Wheel at ICON Park")
+• Use realistic, specific durations based on attraction type:
+  - Theme Parks: 6h-8h (Universal Studios, Disney World)
+  - Major Museums: 2h-3h (Science centers, art museums)
+  - Observation Points: 1h-1.5h (Observation wheels, viewpoints)
+  - Parks/Gardens: 1.5h-2h (City parks, botanical gardens)
+  - Historic Sites: 1h-2h (Historic districts, monuments)
+  - Entertainment Districts: 2h-3h (Shopping areas, entertainment complexes)
 • Account for 15-30min travel between activities
 • Choose popular, highly-rated places in {destination}
-• Theme park days should be full day (6-8h)
-• Non-theme park days should have 2-3 landmarks
 
 CRITICAL: NO DUPLICATE LANDMARKS
 • Each landmark must be COMPLETELY UNIQUE across ALL {travel_days} days
@@ -122,6 +128,13 @@ CRITICAL: NO DUPLICATE LANDMARKS
 • Do NOT use variations of the same landmark (e.g., "SeaWorld" on Day 1 and "SeaWorld San Diego" on Day 2)
 • Verify each landmark appears only ONCE in the entire itinerary
 • If you're unsure, choose a different landmark entirely
+
+LANDMARK SELECTION PRIORITY:
+• Choose the MAIN ATTRACTION, not individual rides or sub-attractions
+• Example: "Universal Studios Florida" not "The Wizarding World of Harry Potter"
+• Example: "ICON Park" not "The Wheel at ICON Park"
+• Example: "Balboa Park" not "San Diego Zoo" (unless zoo is the main focus)
+• Focus on the primary destination that encompasses multiple activities
 
 TIMING STRATEGY:
 - FOCUS ON LANDMARKS ONLY - do not schedule meals/restaurants
@@ -145,7 +158,7 @@ Day 3: San Diego Zoo (9:00, 4h), Little Italy (14:00, 1.5h), Embarcadero (16:00,
 CRITICAL FORMATTING:
 - Type: "landmark" only (restaurants will be added later)
 - Start_time: "HH:MM" format
-- Duration: "2h" or "1.5h" format  
+- Duration: Use specific durations like "1h", "1.5h", "2h", "3h", "6h" (not "2-3 hours")
 
 {format_instructions}""",
         input_variables=[
@@ -221,12 +234,14 @@ async def add_restaurants_to_day_optimized(
                 places_client, destination, theme_park_location, ["breakfast", "lunch", "dinner"], used_restaurants
             )
             
+            debug_print(f"🍽️ Found {len(restaurant_data)} restaurants for theme park day")
+            
             for i, (meal_type, start_time, duration) in enumerate(meal_schedule):
                 if i < len(restaurant_data):
                     restaurant_block = ItineraryBlock(
                         name=restaurant_data[i]["name"],
                         type="restaurant",
-                        description=restaurant_data[i]["description"],
+                        description=None,  # Restaurants don't need descriptions - website provides better info
                         start_time=start_time,
                         duration=duration,
                         mealtime=meal_type,
@@ -238,8 +253,10 @@ async def add_restaurants_to_day_optimized(
                         website=restaurant_data[i]["website"]
                     )
                     restaurants.append(restaurant_block)
-                    used_restaurants.add(restaurant_data[i]["name"])
+                    used_restaurants.add(restaurant_data[i]["name"].lower())
                     debug_print(f"   🍽️ {meal_type.title()}: {restaurant_data[i]['name']} at {start_time} ({duration})")
+        else:
+            debug_print("⚠️ No theme park location found for restaurant search")
     
     else:
         # Regular day: Optimize based on landmark distribution
@@ -248,6 +265,7 @@ async def add_restaurants_to_day_optimized(
         if landmarks:
             # Analyze landmark distribution to optimize restaurant searches
             landmark_locations = [lm.location for lm in landmarks if lm.location]
+            debug_print(f"📍 Found {len(landmark_locations)} landmark locations out of {len(landmarks)} landmarks")
             
             if len(landmark_locations) <= 1:
                 # Single landmark or clustered landmarks - use 1 API call for all restaurants
@@ -257,6 +275,8 @@ async def add_restaurants_to_day_optimized(
                 restaurant_data = await search_multiple_restaurants_near_location(
                     places_client, destination, search_location, ["breakfast", "lunch", "dinner"], used_restaurants
                 )
+                
+                debug_print(f"🍽️ Found {len(restaurant_data)} restaurants for single landmark area")
                 
                 # Calculate strategic meal times
                 first_landmark_start = parse_time_to_minutes(landmarks[0].start_time)
@@ -274,7 +294,7 @@ async def add_restaurants_to_day_optimized(
                         restaurant_block = ItineraryBlock(
                             name=restaurant_data[i]["name"],
                             type="restaurant",
-                            description=restaurant_data[i]["description"],
+                            description=None,  # Restaurants don't need descriptions - website provides better info
                             start_time=time_str,
                             duration=duration,
                             mealtime=meal_type,
@@ -286,7 +306,7 @@ async def add_restaurants_to_day_optimized(
                             website=restaurant_data[i]["website"]
                         )
                         restaurants.append(restaurant_block)
-                        used_restaurants.add(restaurant_data[i]["name"])
+                        used_restaurants.add(restaurant_data[i]["name"].lower())
                         debug_print(f"   🍽️ {meal_type.title()}: {restaurant_data[i]['name']} at {time_str} ({duration})")
             
             else:
@@ -331,6 +351,8 @@ async def add_restaurants_to_day_optimized(
                         places_client, destination, group["location"], meal_types, used_restaurants
                     )
                     
+                    debug_print(f"🍽️ Found {len(restaurant_data)} restaurants for location group")
+                    
                     # Assign restaurants to meals
                     for i, (meal_type, time_minutes, duration) in enumerate(group["meals"]):
                         if i < len(restaurant_data):
@@ -338,7 +360,7 @@ async def add_restaurants_to_day_optimized(
                             restaurant_block = ItineraryBlock(
                                 name=restaurant_data[i]["name"],
                                 type="restaurant",
-                                description=restaurant_data[i]["description"],
+                                description=None,  # Restaurants don't need descriptions - website provides better info
                                 start_time=time_str,
                                 duration=duration,
                                 mealtime=meal_type,
@@ -350,7 +372,7 @@ async def add_restaurants_to_day_optimized(
                                 website=restaurant_data[i]["website"]
                             )
                             restaurants.append(restaurant_block)
-                            used_restaurants.add(restaurant_data[i]["name"])
+                            used_restaurants.add(restaurant_data[i]["name"].lower())
                             debug_print(f"   🍽️ {meal_type.title()}: {restaurant_data[i]['name']} at {time_str} ({duration})")
         
         else:
@@ -359,6 +381,8 @@ async def add_restaurants_to_day_optimized(
             restaurant_data = await search_multiple_restaurants_near_location(
                 places_client, destination, None, ["breakfast", "lunch", "dinner"], used_restaurants
             )
+            
+            debug_print(f"🍽️ Found {len(restaurant_data)} restaurants for destination center")
             
             meal_times = [
                 ("breakfast", "08:00", "45m"),
@@ -371,7 +395,7 @@ async def add_restaurants_to_day_optimized(
                     restaurant_block = ItineraryBlock(
                         name=restaurant_data[i]["name"],
                         type="restaurant",
-                        description=restaurant_data[i]["description"],
+                        description=None,  # Restaurants don't need descriptions - website provides better info
                         start_time=start_time,
                         duration=duration,
                         mealtime=meal_type,
@@ -383,19 +407,18 @@ async def add_restaurants_to_day_optimized(
                         website=restaurant_data[i]["website"]
                     )
                     restaurants.append(restaurant_block)
-                    used_restaurants.add(restaurant_data[i]["name"])
+                    used_restaurants.add(restaurant_data[i]["name"].lower())
+                    debug_print(f"   🍽️ {meal_type.title()}: {restaurant_data[i]['name']} at {start_time} ({duration})")
     
-    # Combine landmarks and restaurants
-    all_blocks = landmarks + restaurants
+    # Create new day plan with restaurants added
+    enhanced_day = StructuredDayPlan(
+        day=day_plan.day,
+        blocks=day_plan.blocks + restaurants  # Add restaurants to existing landmarks
+    )
     
-    debug_print(f"✅ Day {day_plan.day}: Added {len(restaurants)} restaurants with optimized API calls")
-    debug_print(f"📋 Final schedule:")
-    all_blocks_sorted = sorted(all_blocks, key=lambda x: parse_time_to_minutes(x.start_time))
-    for block in all_blocks_sorted:
-        icon = "🏛️" if block.type == "landmark" else "🍽️"
-        debug_print(f"   {icon} {block.name}: {block.start_time} ({block.duration})")
+    debug_print(f"✅ Day {day_plan.day} enhanced: {len(day_plan.blocks)} landmarks + {len(restaurants)} restaurants = {len(enhanced_day.blocks)} total blocks")
     
-    return StructuredDayPlan(day=day_plan.day, blocks=all_blocks)
+    return enhanced_day
 
 
 async def search_multiple_restaurants_near_location(
@@ -415,12 +438,16 @@ async def search_multiple_restaurants_near_location(
         
         if location:
             search_params["location"] = {"lat": location.lat, "lng": location.lng}
+            debug_print(f"🔍 Searching restaurants near location: {location.lat:.3f}, {location.lng:.3f}")
         else:
             # Geocode destination if no location provided
+            debug_print(f"🔍 Geocoding destination: {destination}")
             geocode_result = await places_client.geocode(destination)
             if not geocode_result:
+                debug_print("❌ Failed to geocode destination")
                 return []
             search_params["location"] = geocode_result
+            debug_print(f"🔍 Using geocoded location: {geocode_result}")
         
         debug_print(f"🔍 Single API call for {len(meal_types)} meals: {meal_types}")
         
@@ -428,58 +455,99 @@ async def search_multiple_restaurants_near_location(
         results = await places_client.places_nearby(**search_params)
         
         if not results or not results.get("results"):
+            debug_print("❌ No results from places_nearby API call")
             return []
+        
+        debug_print(f"📊 Places API returned {len(results['results'])} total places")
         
         # Find suitable restaurants for each meal type
         suitable_restaurants = []
+        hotel_restaurants_filtered = 0
+        low_rating_filtered = 0
+        already_used_filtered = 0
+        
         for place in results["results"]:
             name = place.get("name", "").lower()
-            if name not in used_restaurants and place.get("rating", 0) >= 4.0:
-                suitable_restaurants.append(place)
-                if len(suitable_restaurants) >= len(meal_types) + 2:  # Get a few extra options
-                    break
+            
+            # Skip hotel restaurants and other non-restaurant establishments
+            place_types = place.get('types', [])
+            place_name_lower = place.get('name', '').lower()
+            
+            # Check for lodging/hotel types
+            if 'lodging' in place_types or 'hotel' in place_types:
+                hotel_restaurants_filtered += 1
+                debug_print(f"🏨 Skipping hotel restaurant: {place.get('name')}")
+                continue
+            
+            # Check for club/athletic establishments that might not be proper restaurants
+            if ('club' in place_name_lower and ('athletic' in place_name_lower or 'country' in place_name_lower or 'golf' in place_name_lower)):
+                hotel_restaurants_filtered += 1
+                debug_print(f"🏌️ Skipping club establishment: {place.get('name')}")
+                continue
+            
+            # Skip if already used
+            if name in used_restaurants:
+                already_used_filtered += 1
+                continue
+                
+            # Skip if low rating
+            rating = place.get("rating", 0)
+            if rating < 4.0:
+                low_rating_filtered += 1
+                continue
+            
+            suitable_restaurants.append(place)
+            if len(suitable_restaurants) >= len(meal_types) + 5:  # Get more options for diversity
+                break
+        
+        debug_print(f"🍽️ Restaurant filtering results:")
+        debug_print(f"   📊 Total places: {len(results['results'])}")
+        debug_print(f"   🏨 Hotel restaurants filtered: {hotel_restaurants_filtered}")
+        debug_print(f"   ⭐ Low rating filtered: {low_rating_filtered}")
+        debug_print(f"   🔄 Already used filtered: {already_used_filtered}")
+        debug_print(f"   ✅ Suitable restaurants: {len(suitable_restaurants)}")
         
         if not suitable_restaurants:
+            debug_print("❌ No suitable restaurants found after filtering")
             return []
         
-        # Select restaurants to avoid duplicates
+        # Select restaurants with better diversity - skip some restaurants to avoid same ones across days
         selected_restaurants = []
-        for i in range(min(len(meal_types), len(suitable_restaurants))):
-            place_data = suitable_restaurants[i]
+        
+        # Add some randomization for diversity across days and meal types
+        if len(suitable_restaurants) > len(meal_types):
+            # Shuffle the suitable restaurants to get different ones each day
+            shuffled_restaurants = suitable_restaurants.copy()
+            random.shuffle(shuffled_restaurants)
+            suitable_restaurants = shuffled_restaurants
+            debug_print(f"🔀 Shuffled restaurants for diversity")
+        
+        # Try to select different types of restaurants for different meals
+        for i, meal_type in enumerate(meal_types):
+            if i < len(suitable_restaurants):
+                place_data = suitable_restaurants[i]
             
-            # 🚀 COST OPTIMIZATION: Use LLM descriptions instead of place_details calls
-            llm_service = await get_llm_description_service()
-            user_preferences = {
-                'meal_type': meal_types[i] if i < len(meal_types) else 'restaurant',
-                'destination': destination
-            }
-            
-            enhanced_restaurants = await llm_service.generate_place_descriptions(
-                [place_data], 
-                destination, 
-                user_preferences
-            )
-            
-            if enhanced_restaurants:
-                enhanced_place = enhanced_restaurants[0]
+                # 🚀 LATENCY OPTIMIZATION: Skip descriptions for restaurants entirely
+                # Users get better info from website, rating, and address from Google API
                 formatted_data = {
-                    "name": enhanced_place.get("name", f"Local Restaurant"),
-                    "description": enhanced_place.get("description", _generate_restaurant_description(enhanced_place)),
-                    "location": _extract_location_from_place_data(enhanced_place),
-                    "place_id": enhanced_place.get("place_id"),
-                    "rating": enhanced_place.get("rating"),
-                    "address": enhanced_place.get("formatted_address") or enhanced_place.get("vicinity"),
-                    "photo_url": extract_photo_url(enhanced_place),
-                    "website": enhanced_place.get("website")
+                    "name": place_data.get("name", f"Local Restaurant"),
+                    "location": _extract_location_from_place_data(place_data),
+                    "place_id": place_data.get("place_id"),
+                    "rating": place_data.get("rating"),
+                    "address": place_data.get("formatted_address") or place_data.get("vicinity"),
+                    "photo_url": extract_photo_url(place_data),
+                    "website": place_data.get("website")
                 }
                 selected_restaurants.append(formatted_data)
-                used_restaurants.add(formatted_data["name"])
+                used_restaurants.add(formatted_data["name"].lower())  # Store lowercase for better matching
+                debug_print(f"✅ Selected {meal_type}: {formatted_data['name']} (rating: {formatted_data['rating']})")
         
-        debug_print(f"🍽️ Found {len(selected_restaurants)} restaurants with 1 API call (saved {len(meal_types)-1} calls)")
+        debug_print(f"🍽️ Final result: {len(selected_restaurants)} restaurants selected with 1 API call")
         return selected_restaurants
         
     except Exception as e:
         logger.error(f"Error searching for multiple restaurants: {e}")
+        debug_print(f"❌ Exception in restaurant search: {e}")
         return []
 
 
@@ -525,13 +593,22 @@ async def enhance_itinerary_simultaneously(
     
     end_time = time.time()
     
-    # Update itinerary with restaurant results
-    for i, enhanced_day in enumerate(restaurant_results):
+    # Update itinerary with restaurant results - FIXED MERGING LOGIC
+    for i, enhanced_day_with_restaurants in enumerate(restaurant_results):
         if i < len(enhanced_itinerary.itinerary):
-            # Merge restaurants with enhanced landmarks
-            landmark_blocks = [b for b in enhanced_itinerary.itinerary[i].blocks if b.type == "landmark"]
-            restaurant_blocks = [b for b in enhanced_day.blocks if b.type == "restaurant"]
-            enhanced_itinerary.itinerary[i].blocks = landmark_blocks + restaurant_blocks
+            # Get enhanced landmarks from the enhancement task
+            enhanced_landmarks = [b for b in enhanced_itinerary.itinerary[i].blocks if b.type == "landmark"]
+            # Get restaurants from the restaurant addition task
+            restaurants = [b for b in enhanced_day_with_restaurants.blocks if b.type == "restaurant"]
+            
+            # Combine and sort all blocks by start time
+            all_blocks = enhanced_landmarks + restaurants
+            all_blocks.sort(key=lambda x: parse_time_to_minutes(x.start_time))
+            
+            # Update the enhanced itinerary with the combined blocks
+            enhanced_itinerary.itinerary[i].blocks = all_blocks
+            
+            debug_print(f"📅 Day {i+1}: {len(enhanced_landmarks)} landmarks + {len(restaurants)} restaurants = {len(all_blocks)} total blocks")
     
     performance_metrics = {
         "restaurant_and_enhancement_time": round(end_time - start_time, 2),
@@ -633,101 +710,29 @@ async def search_and_get_restaurant(
         if not suitable_restaurants:
             return None
         
-        # 🚀 COST OPTIMIZATION: Use LLM descriptions instead of expensive place_details calls
-        debug_print(f"💰 Using LLM descriptions for {len(suitable_restaurants)} restaurants (saving ${len(suitable_restaurants) * 0.017:.3f})")
+        # 🚀 LATENCY OPTIMIZATION: Skip descriptions for restaurants entirely
+        # Users get better info from website, rating, and address from Google API
+        place_data = suitable_restaurants[0]  # Take the first suitable restaurant
         
-        # Generate LLM descriptions for all candidates
-        llm_service = await get_llm_description_service()
-        user_preferences = {
-            'meal_type': meal_type,
-            'destination': destination
+        # Format the data properly for add_restaurants_to_day
+        formatted_data = {
+            "name": place_data.get("name", f"Local {meal_type.title()} Spot"),
+            "location": _extract_location_from_place_data(place_data),
+            "place_id": place_data.get("place_id"),
+            "rating": place_data.get("rating"),
+            "address": place_data.get("formatted_address") or place_data.get("vicinity"),
+            "photo_url": extract_photo_url(place_data),
+            "website": place_data.get("website")
         }
         
-        enhanced_restaurants = await llm_service.generate_place_descriptions(
-            suitable_restaurants, 
-            destination, 
-            user_preferences
-        )
-        
-        # Select the first enhanced restaurant
-        if enhanced_restaurants:
-            place_data = enhanced_restaurants[0]
-            
-            # Format the data properly for add_restaurants_to_day
-            formatted_data = {
-                "name": place_data.get("name", f"Local {meal_type.title()} Spot"),
-                "description": place_data.get("description", _generate_restaurant_description(place_data)),
-                "location": _extract_location_from_place_data(place_data),
-                "place_id": place_data.get("place_id"),
-                "rating": place_data.get("rating"),
-                "address": place_data.get("formatted_address") or place_data.get("vicinity"),
-                "photo_url": extract_photo_url(place_data),
-                "website": place_data.get("website")
-            }
-            
-            debug_print(f"🍽️ Found restaurant with LLM description: {formatted_data['name']} (rating: {formatted_data['rating']})")
-            return formatted_data
-        
-        return None
+        debug_print(f"🍽️ Found restaurant without LLM: {formatted_data['name']} (rating: {formatted_data['rating']})")
+        return formatted_data
     except Exception as e:
         logger.error(f"Error searching for restaurant: {e}")
         return None
 
-def _generate_restaurant_description(place_data: Dict) -> str:
-    """Generate a restaurant description from Google Places data"""
-    # Try to get a meaningful description
-    description_sources = [
-        place_data.get('editorial_summary', {}).get('overview') if isinstance(place_data.get('editorial_summary'), dict) else None,
-        _extract_description_from_reviews(place_data.get('reviews', [])),
-        _create_description_from_types(place_data.get('types', []))
-    ]
-    
-    # Use first non-empty description
-    for desc in description_sources:
-        if desc and desc.strip():
-            return desc.strip()
-    
-    # Fallback to generic description
-    return "Restaurant"
-
-def _extract_description_from_reviews(reviews: list) -> str:
-    """Extract description from restaurant reviews"""
-    if not reviews or not isinstance(reviews, list):
-        return ""
-    
-    # Look for descriptive phrases in reviews
-    for review in reviews[:3]:  # Check first 3 reviews
-        if isinstance(review, dict) and review.get('text'):
-            text = review['text'].lower()
-            # Look for cuisine type mentions
-            cuisine_keywords = ['italian', 'mexican', 'chinese', 'japanese', 'thai', 'indian', 'american', 'french', 'mediterranean']
-            for cuisine in cuisine_keywords:
-                if cuisine in text:
-                    return f"Popular {cuisine.title()} restaurant"
-    
-    return ""
-
-def _create_description_from_types(types: list) -> str:
-    """Create description from Google Places types"""
-    if not types or not isinstance(types, list):
-        return ""
-    
-    # Map types to descriptions
-    type_descriptions = {
-        'meal_takeaway': 'Takeaway restaurant',
-        'meal_delivery': 'Delivery restaurant', 
-        'bakery': 'Bakery and cafe',
-        'cafe': 'Cozy cafe',
-        'bar': 'Restaurant and bar',
-        'night_club': 'Restaurant and nightclub',
-        'fast_food': 'Fast food restaurant'
-    }
-    
-    for place_type in types:
-        if place_type in type_descriptions:
-            return type_descriptions[place_type]
-    
-    return "Restaurant"
+# Restaurant description functions removed - descriptions no longer needed
+# Users get better information from restaurant websites and Google data
 
 def _extract_location_from_place_data(place_data: Dict) -> Optional[Location]:
     """Extract Location object from Google Places data"""
@@ -760,9 +765,9 @@ async def enhance_landmarks_cost_efficiently(
         for day in itinerary.itinerary
     )
     
-    # Dynamic API limit - reduced for speed
-    min_coverage = max(4, int(total_landmarks * 0.7))  # Reduced to 70% coverage for speed
-    max_api_calls = min(min_coverage, 10)  # Reduced cap to 10 for maximum speed
+    # INCREASED API LIMIT to ensure all days get coverage
+    min_coverage = max(6, int(total_landmarks * 0.8))  # Increased to 80% coverage
+    max_api_calls = min(min_coverage, 15)  # Increased cap to 15 for better coverage
     
     debug_print(f"💰 Starting cost-efficient landmark enhancement...")
     debug_print(f"📊 Total landmarks: {total_landmarks}, API limit: {max_api_calls} (targeting {min_coverage}/{total_landmarks} coverage)")
@@ -787,30 +792,56 @@ async def enhance_landmarks_cost_efficiently(
     for day_plan in itinerary.itinerary:
         for i, block in enumerate(day_plan.blocks):
             if block.type == "landmark":
-                # Skip if landmark already has Google Places data
-                if block.place_id and block.location and block.address:
-                    debug_print(f"   ⏭️ Skipping {block.name} - already has Google data")
-                    continue
+                # ALWAYS enhance landmarks that are missing essential data
+                needs_enhancement = False
                 
                 # Calculate priority score (higher = more important to enhance)
                 priority = 0
-                if not block.place_id: priority += 3    # Place ID is most important for frontend
-                if not block.location: priority += 2    # Location is important for maps
-                if not block.address: priority += 2     # Address is important for display
-                if not block.photo_url: priority += 2   # Photo is very important for UI (increased priority)
-                if not block.rating: priority += 1      # Rating is nice to have
+                if not block.place_id: 
+                    priority += 3
+                    needs_enhancement = True
+                if not block.location: 
+                    priority += 2
+                    needs_enhancement = True
+                if not block.address: 
+                    priority += 2
+                    needs_enhancement = True
+                if not block.photo_url: 
+                    priority += 3  # Increased priority for photos
+                    needs_enhancement = True
+                if not block.rating: 
+                    priority += 1
+                    needs_enhancement = True
+                if not block.website:
+                    priority += 2  # Added priority for websites
+                    needs_enhancement = True
                 
-                if priority > 0:
+                # Add day-based priority to ensure all days get coverage
+                day_priority_bonus = 0
+                if day_plan.day == 1:
+                    day_priority_bonus = 10  # Highest priority for Day 1
+                elif day_plan.day == 2:
+                    day_priority_bonus = 8   # High priority for Day 2
+                elif day_plan.day == 3:
+                    day_priority_bonus = 6   # Ensure Day 3 gets coverage too
+                
+                priority += day_priority_bonus
+                
+                if needs_enhancement:
                     landmarks_to_enhance.append({
                         'block': block,
                         'day': day_plan.day,
                         'priority': priority
                     })
+                    debug_print(f"   📋 Day {day_plan.day}: {block.name} needs enhancement (priority: {priority})")
+                else:
+                    debug_print(f"   ⏭️ Day {day_plan.day}: {block.name} - already has complete data")
     
     # Sort by priority (highest first) to enhance most important landmarks first
     landmarks_to_enhance.sort(key=lambda x: x['priority'], reverse=True)
     
     debug_print(f"📋 Found {len(landmarks_to_enhance)} landmarks needing enhancement")
+    debug_print(f"🎯 Priority order: {[(item['block'].name, item['day'], item['priority']) for item in landmarks_to_enhance[:5]]}")
     
     # Batch enhance landmarks with LLM descriptions for cost optimization
     landmarks_needing_google_data = []
@@ -821,9 +852,9 @@ async def enhance_landmarks_cost_efficiently(
         block = item['block']
         priority = item['priority']
         
-        # All landmarks get Google API call for complete data (place_id, location, photos)
+        # All landmarks get Google API call for complete data (place_id, location, photos, websites)
         # Only skip Google API if landmark already has ALL essential data
-        if not block.place_id or not block.location or not block.photo_url:
+        if not block.place_id or not block.location or not block.photo_url or not block.website:
             landmarks_needing_google_data.append(item)
         else:
             # Only use LLM for landmarks that have all Google data but need better descriptions
@@ -899,32 +930,74 @@ async def enhance_landmarks_cost_efficiently(
 
     # 🚀 SPEED OPTIMIZATION: Simplified Google API processing for photos only
     async def enhance_photos_and_data():
-        """Enhance landmarks with photos and essential data only"""
+        """Enhance landmarks with photos and Google Places data in parallel"""
         nonlocal api_calls_made
         
-        # Collect landmarks that need photo enhancement
-        landmarks_needing_photos = []
+        if not landmarks_needing_google_data:
+            debug_print("📸 No landmarks need Google Places data enhancement")
+            return
+        
+        debug_print(f"📸 Starting photo enhancement for {len(landmarks_needing_google_data)} landmarks")
+        
+        # Track enhancement results
+        enhanced_count = 0
+        failed_count = 0
+        
+        # Process landmarks in batches to avoid overwhelming the API
+        batch_size = 3
+        for i in range(0, len(landmarks_needing_google_data), batch_size):
+            batch = landmarks_needing_google_data[i:i + batch_size]
+            
+            # Process batch in parallel
+            tasks = []
+            for item in batch:
+                if api_calls_made < max_api_calls:
+                    task = enhance_single_landmark_photos(item['block'])
+                    tasks.append(task)
+                else:
+                    debug_print(f"💰 API limit reached, skipping {item['block'].name}")
+                    break
+            
+            if tasks:
+                results = await asyncio.gather(*tasks, return_exceptions=True)
+                for j, result in enumerate(results):
+                    if isinstance(result, Exception):
+                        debug_print(f"❌ Error enhancing {batch[j]['block'].name}: {result}")
+                        failed_count += 1
+                    elif result:
+                        enhanced_count += 1
+                    else:
+                        failed_count += 1
+        
+        debug_print(f"📸 Photo enhancement complete: {enhanced_count} enhanced, {failed_count} failed, {api_calls_made} API calls used")
+        
+        # Report which landmarks still don't have photos
+        landmarks_without_photos = []
+        landmarks_without_websites = []
         for day_plan in itinerary.itinerary:
             for block in day_plan.blocks:
-                if block.type == "landmark" and not block.photo_url:
-                    landmarks_needing_photos.append(block)
+                if block.type == "landmark":
+                    if not block.photo_url:
+                        landmarks_without_photos.append(f"Day {day_plan.day}: {block.name}")
+                    if not block.website:
+                        landmarks_without_websites.append(f"Day {day_plan.day}: {block.name}")
         
-        if not landmarks_needing_photos:
-            debug_print("📸 All landmarks already have photos")
-            return
+        if landmarks_without_photos:
+            debug_print(f"⚠️ Landmarks still without photos: {landmarks_without_photos}")
+        else:
+            debug_print("✅ All landmarks now have photos!")
             
-        debug_print(f"📸 Enhancing {len(landmarks_needing_photos)} landmarks with photos")
-        
-        # Process only the most important landmarks for photos (speed optimization)
-        tasks = []
-        for block in landmarks_needing_photos[:5]:  # Limit to 5 landmarks for speed
-            task = enhance_single_landmark_photos(block)
-            tasks.append(task)
-        
-        if tasks:
-            results = await asyncio.gather(*tasks, return_exceptions=True)
-            successful = sum(1 for r in results if not isinstance(r, Exception))
-            debug_print(f"📸 Successfully enhanced {successful}/{len(tasks)} landmarks with photos")
+        if landmarks_without_websites:
+            debug_print(f"⚠️ Landmarks still without websites: {landmarks_without_websites}")
+        else:
+            debug_print("✅ All landmarks now have websites!")
+            
+        # Summary by day
+        for day_plan in itinerary.itinerary:
+            landmarks = [b for b in day_plan.blocks if b.type == "landmark"]
+            photos_count = sum(1 for b in landmarks if b.photo_url)
+            websites_count = sum(1 for b in landmarks if b.website)
+            debug_print(f"📊 Day {day_plan.day}: {len(landmarks)} landmarks, {photos_count} photos, {websites_count} websites")
 
     async def enhance_single_landmark_photos(block):
         """Enhance a single landmark with photos and basic data"""
@@ -936,53 +1009,133 @@ async def enhance_landmarks_cost_efficiently(
         try:
             # Use places_nearby to find the landmark
             search_location = destination_location or {"lat": 37.7749, "lng": -122.4194}  # Default to SF
-            results = await places_client.places_nearby(
-                location=search_location,
-                radius=25000,  # 25km radius
-                place_type="tourist_attraction",
-                keyword=block.name
-            )
-            api_calls_made += 1
             
-            if results and results.get('results'):
-                # Find the best match
-                best_match = None
-                best_score = 0
-                
-                for place_data in results['results'][:3]:
-                    place_name = place_data.get('name', '').lower()
-                    landmark_name = block.name.lower()
+            # Try multiple search strategies for better photo coverage
+            search_strategies = [
+                # Strategy 1: Exact name search with tourist_attraction
+                {
+                    "location": search_location,
+                    "radius": 25000,  # 25km radius
+                    "place_type": "tourist_attraction",
+                    "keyword": block.name
+                },
+                # Strategy 2: Broader search with establishment type
+                {
+                    "location": search_location,
+                    "radius": 30000,  # 30km radius
+                    "place_type": "establishment",
+                    "keyword": block.name
+                }
+            ]
+            
+            best_match = None
+            
+            for strategy in search_strategies:
+                if api_calls_made >= max_api_calls:
+                    break
                     
-                    if landmark_name in place_name or place_name in landmark_name:
-                        score = len(set(landmark_name.split()) & set(place_name.split()))
+                results = await places_client.places_nearby(**strategy)
+                api_calls_made += 1
+                debug_print(f"   🔍 Search strategy for {block.name}: {len(results.get('results', []))} results")
+                
+                if results and results.get('results'):
+                    # Find the best match with more flexible matching
+                    best_score = 0
+                    
+                    for place_data in results['results'][:5]:  # Check top 5 results
+                        place_name = place_data.get('name', '').lower()
+                        landmark_name = block.name.lower()
+                        
+                        # Multiple matching strategies
+                        score = 0
+                        
+                        # Exact match gets highest score
+                        if landmark_name == place_name:
+                            score = 100
+                        # Substring match
+                        elif landmark_name in place_name or place_name in landmark_name:
+                            score = 80
+                        # Word overlap
+                        else:
+                            landmark_words = set(landmark_name.split())
+                            place_words = set(place_name.split())
+                            common_words = landmark_words & place_words
+                            if common_words:
+                                score = len(common_words) * 20
+                        
+                        # Bonus points for having photos
+                        if place_data.get('photos'):
+                            score += 10
+                            
+                        # Bonus points for having rating
+                        if place_data.get('rating'):
+                            score += 5
+                        
                         if score > best_score:
                             best_score = score
                             best_match = place_data
+                            debug_print(f"   📸 Better match found: {place_name} (score: {score})")
                 
-                if best_match:
-                    # Update only essential data
-                    if not block.place_id and best_match.get('place_id'):
-                        block.place_id = best_match['place_id']
-                    
-                    if not block.rating and best_match.get('rating'):
-                        block.rating = best_match['rating']
-                    
-                    if not block.location and 'geometry' in best_match:
-                        loc = best_match['geometry']['location']
-                        block.location = Location(lat=loc['lat'], lng=loc['lng'])
-                    
-                    if not block.address:
-                        block.address = best_match.get('formatted_address') or best_match.get('vicinity')
-                    
-                    # Most importantly - add photo URL
-                    if not block.photo_url:
-                        block.photo_url = extract_photo_url(best_match)
-                    
-                    if not block.website and best_match.get('website'):
-                        block.website = best_match['website']
-                    
-                    debug_print(f"   📸 Enhanced {block.name} with photo and data")
-                    return True
+                # If we found a good match, stop searching
+                if best_match and best_score >= 80:
+                    break
+            
+            if best_match:
+                # Update only essential data
+                if not block.place_id and best_match.get('place_id'):
+                    block.place_id = best_match['place_id']
+                    debug_print(f"   🆔 Added place_id for {block.name}")
+                
+                if not block.rating and best_match.get('rating'):
+                    block.rating = best_match['rating']
+                    debug_print(f"   ⭐ Added rating {best_match['rating']} for {block.name}")
+                
+                if not block.location and 'geometry' in best_match:
+                    loc = best_match['geometry']['location']
+                    block.location = Location(lat=loc['lat'], lng=loc['lng'])
+                    debug_print(f"   📍 Added location for {block.name}")
+                
+                if not block.address:
+                    address = best_match.get('formatted_address') or best_match.get('vicinity')
+                    if address:
+                        block.address = address
+                        debug_print(f"   📮 Added address for {block.name}: {address}")
+                
+                # Most importantly - add photo URL with better error handling
+                if not block.photo_url:
+                    photo_url = extract_photo_url(best_match)
+                    if photo_url:
+                        block.photo_url = photo_url
+                        debug_print(f"   📸 Added photo URL for {block.name}: {photo_url}")
+                    else:
+                        debug_print(f"   ⚠️ No photo available for {block.name}")
+                
+                # IMPROVED WEBSITE ASSIGNMENT - be more aggressive
+                if not block.website:
+                    website = best_match.get('website')
+                    if website:
+                        block.website = website
+                        debug_print(f"   🌐 Added website for {block.name}: {website}")
+                    else:
+                        # Try to get website from place details if we have place_id
+                        if best_match.get('place_id') and api_calls_made < max_api_calls:
+                            try:
+                                place_details = await places_client.place_details(best_match['place_id'])
+                                api_calls_made += 1
+                                if place_details and place_details.get('result', {}).get('website'):
+                                    block.website = place_details['result']['website']
+                                    debug_print(f"   🌐 Added website from place details for {block.name}: {block.website}")
+                                else:
+                                    debug_print(f"   ⚠️ No website found in place details for {block.name}")
+                            except Exception as e:
+                                debug_print(f"   ❌ Error getting place details for {block.name}: {e}")
+                        else:
+                            debug_print(f"   ⚠️ No website available for {block.name}")
+                
+                debug_print(f"   ✅ Enhanced {block.name} with Google Places data (score: {best_score})")
+                return True
+            else:
+                debug_print(f"   ❌ No suitable match found for {block.name}")
                     
         except Exception as e:
             debug_print(f"   ❌ Error enhancing {block.name}: {e}")
@@ -1155,33 +1308,31 @@ async def complete_itinerary_from_selection(
         performance_metrics["timings"]["duplicate_removal"] = round(duplicate_end_time - duplicate_start_time, 2)
         debug_print(f"✅ Duplicate landmark check completed in {duplicate_end_time - duplicate_start_time:.2f} seconds")
         
-        # Format result
+        # Format result - fix double nesting issue
         result = {
-            "itinerary": {
-                "itinerary": [
-                    {
-                        "day": day.day,
-                        "blocks": [
-                            {
-                                "type": block.type,
-                                "name": block.name,
-                                "description": block.description,
-                                "start_time": block.start_time,
-                                "duration": block.duration,
-                                "mealtime": block.mealtime,
-                                "place_id": block.place_id,
-                                "rating": block.rating,
-                                "location": {"lat": block.location.lat, "lng": block.location.lng} if block.location else None,
-                                "address": block.address,
-                                "photo_url": block.photo_url,
-                                "website": block.website
-                            }
-                            for block in day.blocks
-                        ]
-                    }
-                    for day in itinerary.itinerary
-                ]
-            },
+            "itinerary": [
+                {
+                    "day": day.day,
+                    "blocks": [
+                        {
+                            "type": block.type,
+                            "name": block.name,
+                            "description": block.description,
+                            "start_time": block.start_time,
+                            "duration": block.duration,
+                            "mealtime": block.mealtime,
+                            "place_id": block.place_id,
+                            "rating": block.rating,
+                            "location": {"lat": block.location.lat, "lng": block.location.lng} if block.location else None,
+                            "address": block.address,
+                            "photo_url": block.photo_url,
+                            "website": block.website
+                        }
+                        for block in day.blocks
+                    ]
+                }
+                for day in itinerary.itinerary
+            ],
             "performance_metrics": performance_metrics
         }
         
@@ -1210,14 +1361,29 @@ def parse_duration_to_minutes(duration_str: str) -> int:
     """Parse duration string like '1.5h', '45m' to minutes"""
     try:
         duration_str = duration_str.lower().strip()
+        debug_print(f"🕐 Parsing duration: '{duration_str}'")
+        
         if 'h' in duration_str:
-            hours = float(duration_str.replace('h', '').replace('hours', ''))
-            return int(hours * 60)
+            # Handle formats like '1h', '1.5h', '2hours'
+            hours_str = duration_str.replace('h', '').replace('hours', '').replace('hour', '').strip()
+            hours = float(hours_str)
+            minutes = int(hours * 60)
+            debug_print(f"   ✅ Parsed {duration_str} as {hours} hours = {minutes} minutes")
+            return minutes
         elif 'm' in duration_str:
-            return int(duration_str.replace('m', '').replace('min', '').replace('minutes', ''))
+            # Handle formats like '45m', '90min', '120minutes'
+            minutes_str = duration_str.replace('m', '').replace('min', '').replace('minutes', '').replace('minute', '').strip()
+            minutes = int(float(minutes_str))
+            debug_print(f"   ✅ Parsed {duration_str} as {minutes} minutes")
+            return minutes
         else:
-            return int(float(duration_str) * 60)
-    except:
+            # Fallback: assume it's hours if no unit specified
+            hours = float(duration_str)
+            minutes = int(hours * 60)
+            debug_print(f"   ✅ Parsed {duration_str} (no unit) as {hours} hours = {minutes} minutes")
+            return minutes
+    except Exception as e:
+        debug_print(f"   ❌ Error parsing duration '{duration_str}': {e}, defaulting to 120 minutes")
         return 120  # Default 2 hours
 
 async def remove_duplicate_landmarks(itinerary: StructuredItinerary, places_client: Optional[GooglePlacesClient] = None) -> StructuredItinerary:
@@ -1343,9 +1509,10 @@ def extract_photo_url(place_data: Dict) -> Optional[str]:
         photos = place_data.get('photos', [])
         if photos and photos[0].get('photo_reference'):
             photo_ref = photos[0]['photo_reference']
-            return f"/photo-proxy/{photo_ref}?maxwidth=400&maxheight=400"
-    except Exception:
-        pass
+            # Use the correct image proxy endpoint that we know works
+            return f"/api/v1/image_proxy?photoreference={photo_ref}&maxwidth=800"
+    except Exception as e:
+        debug_print(f"⚠️ Error extracting photo URL: {e}")
     return None
 
 def _is_theme_park_day(day_plan: StructuredDayPlan) -> bool:

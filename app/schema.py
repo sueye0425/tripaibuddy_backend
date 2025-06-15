@@ -34,7 +34,7 @@ class LandmarkSelection(BaseModel):
 class ItineraryBlock(BaseModel):
     type: str  # "landmark" or "restaurant"
     name: str
-    description: Optional[str] = None  # Optional - landmarks have descriptions, restaurants don't
+    description: Optional[str] = None  # Only used for landmarks, not restaurants
     start_time: str  # e.g., "9:00 AM"
     duration: str  # e.g., "2 hours"
     mealtime: Optional[str] = None  # "lunch" or "dinner" - only for restaurants
@@ -43,7 +43,7 @@ class ItineraryBlock(BaseModel):
     location: Optional[Location] = None  # Coordinates for internal use
     address: Optional[str] = None  # Human-readable address for display
     photo_url: Optional[str] = None  # Proxy URL for photo if available
-    website: Optional[str] = None  # Official website URL for clickable cards
+    website: Optional[str] = None  # Official website URL for clickable cards - primary info source for restaurants
     notes: Optional[str] = None  # Additional context or recommendations
 
 class StructuredDayPlan(BaseModel):
@@ -54,7 +54,7 @@ class StructuredItinerary(BaseModel):
     itinerary: List[StructuredDayPlan]
 
 class CompleteItineraryResponse(BaseModel):
-    itinerary: StructuredItinerary
+    itinerary: List[StructuredDayPlan]  # Direct list instead of nested StructuredItinerary
     performance_metrics: Optional[Dict] = None
 
 # Keep the old models for backward compatibility

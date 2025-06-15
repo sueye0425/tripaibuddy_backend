@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import Response
 from pydantic import BaseModel, field_validator, model_validator
 import aiohttp
 
@@ -86,7 +87,11 @@ allowed_origins = [
     "http://localhost:5176",
     "http://localhost:5177",
     "http://localhost:5178",
-    "http://localhost:5184",  # Added localhost format
+    "http://localhost:5180",
+    "http://localhost:5181",
+    "http://localhost:5182",  # Added missing localhost:5182
+    "http://localhost:5183",
+    "http://localhost:5184",
     "http://localhost:8000",  # Backend URL
     "http://localhost:3000",  # Common React dev port
     "http://localhost:3001",  # Alternative React dev port
@@ -95,6 +100,7 @@ allowed_origins = [
     "http://127.0.0.1:5175",
     "http://127.0.0.1:5176",
     "http://127.0.0.1:5177",
+    "http://127.0.0.1:5180",
     "http://127.0.0.1:5181",
     "http://127.0.0.1:5182",
     "http://127.0.0.1:5183",
@@ -128,6 +134,8 @@ class ItineraryRequest(BaseModel):
     with_elderly: bool = False
     kids_age: Optional[List[int]] = None
     special_requests: Optional[str] = None
+
+
 
     @field_validator('start_date', 'end_date')
     @classmethod
@@ -192,8 +200,13 @@ async def _convert_to_structured_itinerary(
             
             day_landmarks = landmark_list[start_idx:end_idx]
             
-            # Add restaurants for this day (3 meals)
-            day_restaurants = restaurant_list[:3] if len(restaurant_list) >= 3 else restaurant_list
+            # Add restaurants for this day (rotate through available restaurants)
+            restaurant_start_idx = ((day - 1) * restaurants_per_day) % len(restaurant_list)
+            day_restaurants = []
+            for i in range(restaurants_per_day):
+                if restaurant_list:
+                    restaurant_idx = (restaurant_start_idx + i) % len(restaurant_list)
+                    day_restaurants.append(restaurant_list[restaurant_idx])
             
             # Create time schedule
             current_time = 8 * 60 + 30  # Start at 8:30 AM
@@ -229,6 +242,9 @@ async def _convert_to_structured_itinerary(
                 restaurant = day_restaurants[2]
                 current_time = max(current_time, 18 * 60)  # Ensure dinner is at least 6 PM
                 blocks.append(_create_restaurant_block(restaurant, current_time, "dinner"))
+            
+            # Sort blocks by start_time to ensure proper chronological order
+            blocks.sort(key=lambda block: block.start_time)
             
             itinerary_days.append(StructuredDayPlan(day=day, blocks=blocks))
         
@@ -271,8 +287,14 @@ async def _convert_to_structured_itinerary_fast(
             
             day_landmarks = landmark_list[start_idx:end_idx]
             
-            # Add restaurants for this day (3 meals)
-            day_restaurants = restaurant_list[:3] if len(restaurant_list) >= 3 else restaurant_list
+            # Add restaurants for this day (rotate through available restaurants)
+            restaurants_per_day = 3  # breakfast, lunch, dinner
+            restaurant_start_idx = ((day - 1) * restaurants_per_day) % len(restaurant_list)
+            day_restaurants = []
+            for i in range(restaurants_per_day):
+                if restaurant_list:
+                    restaurant_idx = (restaurant_start_idx + i) % len(restaurant_list)
+                    day_restaurants.append(restaurant_list[restaurant_idx])
             
             # Create time schedule
             current_time = 8 * 60 + 30  # Start at 8:30 AM
@@ -308,6 +330,9 @@ async def _convert_to_structured_itinerary_fast(
                 restaurant = day_restaurants[2]
                 current_time = max(current_time, 18 * 60)  # Ensure dinner is at least 6 PM
                 blocks.append(_create_restaurant_block_fast(restaurant, current_time, "dinner"))
+            
+            # Sort blocks by start_time to ensure proper chronological order
+            blocks.sort(key=lambda block: block.start_time)
             
             itinerary_days.append(StructuredDayPlan(day=day, blocks=blocks))
         
@@ -366,7 +391,7 @@ def _create_restaurant_block(restaurant: Dict[str, Any], start_time_minutes: int
     return ItineraryBlock(
         type="restaurant",
         name=restaurant.get('name', 'Unknown Restaurant'),
-        description=restaurant.get('description', ''),
+                    description=None,  # Restaurants don't need descriptions
         start_time=_minutes_to_time_string(start_time_minutes),
         duration=duration,
         mealtime=mealtime,
@@ -426,7 +451,7 @@ def _create_restaurant_block_fast(restaurant: Dict[str, Any], start_time_minutes
     return ItineraryBlock(
         type="restaurant",
         name=restaurant.get('name', 'Unknown Restaurant'),
-        description=restaurant.get('description', f"{restaurant.get('name', 'This restaurant')} is a popular dining spot."),  # Simple fallback
+                    description=None,  # Restaurants don't need descriptions
         start_time=_minutes_to_time_string(start_time_minutes),
         duration=duration,
         mealtime=mealtime,
@@ -497,14 +522,18 @@ async def generate(request: ItineraryRequest):
                 detail="Could not generate recommendations"
             )
         
-        # Convert old format to new structured itinerary format WITHOUT any LLM processing
-        structured_result = await _convert_to_structured_itinerary_fast(
-            result, 
-            request.travel_days
-        )
-            
-        logging.info(f"✅ Generate completed: {len(result.get('landmarks', {}))} landmarks, {len(result.get('restaurants', {}))} restaurants")
-        return structured_result
+        # Convert object format to array format for frontend compatibility
+        landmarks_array = list(result.get('landmarks', {}).values())
+        restaurants_array = list(result.get('restaurants', {}).values())
+        
+        # Return the format expected by frontend (arrays, not objects)
+        logging.info(f"✅ Generate completed: {len(landmarks_array)} landmarks, {len(restaurants_array)} restaurants")
+        return {
+            "recommendations": {
+                "landmarks": landmarks_array,
+                "restaurants": restaurants_array
+            }
+        }
     except Exception as e:
         logging.exception("Error during /generate")
         raise HTTPException(status_code=500, detail=str(e))
@@ -535,15 +564,12 @@ async def complete_itinerary(data: LandmarkSelection):
         if not itinerary_data:
             raise HTTPException(status_code=500, detail="Failed to generate itinerary content.")
 
-        # The structure can be {"itinerary": {"itinerary": [...]}}
-        if isinstance(itinerary_data, dict) and "itinerary" in itinerary_data:
-            structured_itinerary = StructuredItinerary(itinerary=itinerary_data["itinerary"])
-        else:
-            # Or it could be just the list of day plans
-            structured_itinerary = StructuredItinerary(itinerary=itinerary_data)
+        # itinerary_data should now be a list of day plans
+        if not isinstance(itinerary_data, list):
+            raise HTTPException(status_code=500, detail="Invalid itinerary format - expected list of day plans")
         
         return CompleteItineraryResponse(
-            itinerary=structured_itinerary,
+            itinerary=itinerary_data,
             performance_metrics=performance_metrics
         )
     except Exception as e:
@@ -574,13 +600,12 @@ async def image_proxy(photoreference: str, maxwidth: int = 800, maxheight: Optio
         cache_key_params['maxheight'] = maxheight
     
     cache_key = places_client.cache.get_key('image_proxy', **cache_key_params)
-    redis_client = await places_client.cache.get_client()
     
     try:
         # Try to get from cache with a short timeout
         try:
             cached_image = await asyncio.wait_for(
-                places_client.cache.redis_client.get(cache_key),
+                places_client.cache.get(cache_key),
                 timeout=1.0  # 1 second timeout for cache
             )
             if cached_image:
@@ -616,11 +641,7 @@ async def image_proxy(photoreference: str, maxwidth: int = 800, maxheight: Optio
                     try:
                         # Try to cache but don't wait too long
                         await asyncio.wait_for(
-                            places_client.cache.redis_client.set(
-                                cache_key,
-                                img_data,
-                                places_client.cache.ttl['image_proxy']
-                            ),
+                            places_client.cache.set(cache_key, img_data, 'image_proxy'),
                             timeout=1.0  # 1 second timeout for cache set
                         )
                     except (asyncio.TimeoutError, Exception) as e_cache:
