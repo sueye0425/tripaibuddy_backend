@@ -2,7 +2,6 @@ import logging
 from typing import Dict, List, Optional, Any
 from .places_client import GooglePlacesClient
 from .preferences import PreferencesParser
-from .rag import generate_structured_itinerary as rag_generate
 import asyncio
 import json
 import aiohttp
@@ -255,7 +254,7 @@ class RecommendationGenerator:
             location = await self.places_client.geocode(destination)
             if not location:
                 self.logger.error(f"Could not geocode destination: {destination}")
-                return await self.fallback_to_rag(locals())
+                raise HTTPException(status_code=404, detail=f"Could not find location for destination: {destination}")
                 
             # 4. Refined search for landmarks and restaurants
             # 🎯 COST OPTIMIZED: Reduced landmark types configuration
@@ -378,7 +377,7 @@ class RecommendationGenerator:
                     all_results = [restaurant_result]
                     self.logger.info("Continuing with restaurant results after error")
                 else:
-                    return await self.fallback_to_rag(locals())
+                    raise HTTPException(status_code=500, detail="Failed to fetch place data from Google Places API")
             
             # Process landmark results
             landmarks = {}
@@ -500,28 +499,13 @@ class RecommendationGenerator:
 
             self.logger.info(f"Found {len(landmarks)} landmarks and {len(restaurants)} restaurants after ranking/trimming.")
             
-            # Check if we have enough results from Google Places (after ranking and potential RAG)
-            # Note: RAG supplementation happens after this ranking if initial count is low.
+            # Check if we have enough results from Google Places
             if len(landmarks) < 5: 
-                self.logger.info(f"Found only {len(landmarks)} landmarks from Google Places for {destination}, trying RAG to supplement.")
-                # Call RAG to potentially supplement, but don't replace if RAG also fails or returns poorly.
-                # The RAG fallback error needs to be fixed first.
-                rag_results_dict = await self.fallback_to_rag(locals()) # Corrected: await the async fallback_to_rag
-                if isinstance(rag_results_dict, dict):
-                    # Sensibly merge or supplement landmarks from RAG
-                    # For example, add RAG suggestions if they are not already present
-                    rag_suggested_landmarks = rag_results_dict.get("Suggested_Things_to_Do", {})
-                    if isinstance(rag_suggested_landmarks, dict):
-                        for name, rag_place in rag_suggested_landmarks.items():
-                            if name not in landmarks:
-                                landmarks[name] = rag_place # Add if not a duplicate by name
-                    else:
-                        self.logger.warning(f"RAG returned non-dict landmarks: {rag_suggested_landmarks}")
-                else:
-                     self.logger.warning(f"RAG fallback did not return a dict: {rag_results_dict}")
+                self.logger.warning(f"Found only {len(landmarks)} landmarks from Google Places for {destination}. Consider expanding search criteria.")
+                # Continue with whatever landmarks we found - Google Places is our primary source
 
             if not landmarks and not restaurants:
-                 self.logger.error(f"No landmarks or restaurants found for {destination} even after potential RAG supplementation.")
+                 self.logger.error(f"No landmarks or restaurants found for {destination}.")
                  raise HTTPException(status_code=404, detail=f"Could not find sufficient information for {destination}")
             
             return {
@@ -536,54 +520,7 @@ class RecommendationGenerator:
             # For other general errors, return a 500. The RAG bug needs to be fixed regardless.
             raise HTTPException(status_code=500, detail=f"An unexpected error occurred while generating recommendations for {destination}.")
 
-    async def fallback_to_rag(self, params: Dict[str, Any]) -> Dict[str, Any]:
-        """Fallback to RAG system when Google Places fails. Runs synchronous RAG in a thread."""
-        self.logger.info("Falling back to RAG system using asyncio.to_thread")
-        try:
-            # Extract necessary parameters for rag_generate
-            destination = params.get('destination')
-            travel_days = params.get('travel_days')
-            with_kids = params.get('with_kids', False)
-            kids_age_list = params.get('kids_age') # This is a list or None
-            with_elderly = params.get('with_elderly', False)
-            special_requests = params.get('special_requests')
-            start_date = params.get('start_date') # Pass along if rag_generate uses them
-            end_date = params.get('end_date')     # Pass along if rag_generate uses them
-
-            # Handle kids_age: rag_generate expects a single age or None based on its internal logic shown previously.
-            # The RAG function itself has: `kids_age=params['kids_age'][0] if params['kids_age'] else None`
-            # This implies it wants the first kid's age if the list is not empty.
-            kid_age_for_rag = None
-            if kids_age_list and isinstance(kids_age_list, list) and len(kids_age_list) > 0:
-                 try:
-                    kid_age_for_rag = int(kids_age_list[0]) # Take the first age, ensure it's an int
-                 except (ValueError, TypeError):
-                    self.logger.warning(f"Could not parse first kid age from {kids_age_list} for RAG, defaulting to None.")
-            
-            # Run the synchronous rag_generate function in a separate thread
-            # to avoid blocking the asyncio event loop.
-            result = await asyncio.to_thread(
-                rag_generate,
-                destination=destination,
-                travel_days=travel_days,
-                with_kids=with_kids,
-                kids_age=kid_age_for_rag, # Pass the processed single age or None
-                with_elderly=with_elderly,
-                special_requests=special_requests,
-                start_date=start_date, # Pass along just in case RAG logic is updated
-                end_date=end_date      # Pass along just in case RAG logic is updated
-            )
-            self.logger.info(f"RAG generation completed for {destination}.")
-            return result # rag_generate returns a dict
-        except Exception as e:
-            # Log the full traceback for the RAG failure for better debugging
-            self.logger.exception(f"RAG fallback with asyncio.to_thread also failed for destination {params.get('destination')}: {str(e)}")
-            # Return a standard error structure if RAG itself fails
-            return {
-                "error": "RAG fallback process failed.",
-                "landmarks": {},
-                "restaurants": {}
-            } 
+ 
 
     def _calculate_landmark_popularity_score(self, landmark: Dict[str, Any]) -> float:
         """Calculate popularity score for a landmark based on reviews, rating, and other factors."""

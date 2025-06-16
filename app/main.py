@@ -4,6 +4,10 @@ import os
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator, Dict, Any, Optional, List
 from datetime import datetime, timedelta
+from dotenv import load_dotenv
+
+# Load environment variables first
+load_dotenv()
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -87,6 +91,7 @@ allowed_origins = [
     "http://localhost:5176",
     "http://localhost:5177",
     "http://localhost:5178",
+    "http://localhost:5179",  # Added missing localhost:5179
     "http://localhost:5180",
     "http://localhost:5181",
     "http://localhost:5182",  # Added missing localhost:5182
@@ -100,6 +105,8 @@ allowed_origins = [
     "http://127.0.0.1:5175",
     "http://127.0.0.1:5176",
     "http://127.0.0.1:5177",
+    "http://127.0.0.1:5178",
+    "http://127.0.0.1:5179",  # Added missing 127.0.0.1:5179
     "http://127.0.0.1:5180",
     "http://127.0.0.1:5181",
     "http://127.0.0.1:5182",

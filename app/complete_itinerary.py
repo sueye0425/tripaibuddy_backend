@@ -175,19 +175,21 @@ def is_theme_park_day(day_plan: StructuredDayPlan) -> bool:
             name_lower = block.name.lower()
             duration_minutes = parse_duration_to_minutes(block.duration)
             
-            # Check for theme park keywords AND long duration (6+ hours)
+            # Check for theme park keywords
             theme_park_keywords = [
                 "disneyland", "disney", "universal", "six flags", "knott", 
                 "seaworld", "busch gardens", "cedar point", "magic kingdom",
-                "epcot", "hollywood studios", "animal kingdom"
+                "epcot", "hollywood studios", "animal kingdom", "islands of adventure",
+                "studios", "adventure", "theme park"
             ]
             
             is_theme_park_name = any(keyword in name_lower for keyword in theme_park_keywords)
             is_long_duration = duration_minutes >= 360  # 6+ hours
             
-            # Only consider it a theme park day if BOTH conditions are met
-            if is_theme_park_name and is_long_duration:
-                debug_print(f"🎢 Detected theme park day: {block.name} ({block.duration})")
+            # RELAXED DETECTION: Theme park name OR long duration (not both required)
+            # This ensures theme parks get proper meal treatment even with shorter durations
+            if is_theme_park_name or is_long_duration:
+                debug_print(f"🎢 Detected theme park day: {block.name} ({block.duration}) - name_match: {is_theme_park_name}, long_duration: {is_long_duration}")
                 return True
     
     debug_print(f"🏛️ Regular day detected")
@@ -527,8 +529,7 @@ async def search_multiple_restaurants_near_location(
             if i < len(suitable_restaurants):
                 place_data = suitable_restaurants[i]
             
-                # 🚀 LATENCY OPTIMIZATION: Skip descriptions for restaurants entirely
-                # Users get better info from website, rating, and address from Google API
+                # 🚀 COST OPTIMIZED: Use basic places_nearby data only (no additional API calls)
                 formatted_data = {
                     "name": place_data.get("name", f"Local Restaurant"),
                     "location": _extract_location_from_place_data(place_data),
@@ -536,7 +537,7 @@ async def search_multiple_restaurants_near_location(
                     "rating": place_data.get("rating"),
                     "address": place_data.get("formatted_address") or place_data.get("vicinity"),
                     "photo_url": extract_photo_url(place_data),
-                    "website": place_data.get("website")
+                    "website": place_data.get("website")  # Use basic data only
                 }
                 selected_restaurants.append(formatted_data)
                 used_restaurants.add(formatted_data["name"].lower())  # Store lowercase for better matching
@@ -710,11 +711,9 @@ async def search_and_get_restaurant(
         if not suitable_restaurants:
             return None
         
-        # 🚀 LATENCY OPTIMIZATION: Skip descriptions for restaurants entirely
-        # Users get better info from website, rating, and address from Google API
+        # 🚀 COST OPTIMIZED: Use basic places_nearby data only (no additional API calls)
         place_data = suitable_restaurants[0]  # Take the first suitable restaurant
         
-        # Format the data properly for add_restaurants_to_day
         formatted_data = {
             "name": place_data.get("name", f"Local {meal_type.title()} Spot"),
             "location": _extract_location_from_place_data(place_data),
@@ -722,7 +721,7 @@ async def search_and_get_restaurant(
             "rating": place_data.get("rating"),
             "address": place_data.get("formatted_address") or place_data.get("vicinity"),
             "photo_url": extract_photo_url(place_data),
-            "website": place_data.get("website")
+            "website": place_data.get("website")  # Use basic data only
         }
         
         debug_print(f"🍽️ Found restaurant without LLM: {formatted_data['name']} (rating: {formatted_data['rating']})")
@@ -765,12 +764,9 @@ async def enhance_landmarks_cost_efficiently(
         for day in itinerary.itinerary
     )
     
-    # INCREASED API LIMIT to ensure all days get coverage
-    min_coverage = max(6, int(total_landmarks * 0.8))  # Increased to 80% coverage
-    max_api_calls = min(min_coverage, 15)  # Increased cap to 15 for better coverage
-    
-    debug_print(f"💰 Starting cost-efficient landmark enhancement...")
-    debug_print(f"📊 Total landmarks: {total_landmarks}, API limit: {max_api_calls} (targeting {min_coverage}/{total_landmarks} coverage)")
+    # REMOVED API LIMIT - enhance ALL landmarks that need it
+    debug_print(f"💰 Starting landmark enhancement for ALL landmarks...")
+    debug_print(f"📊 Total landmarks: {total_landmarks} - will enhance ALL that need data")
     
     api_calls_made = 0
     
@@ -847,8 +843,8 @@ async def enhance_landmarks_cost_efficiently(
     landmarks_needing_google_data = []
     landmarks_needing_descriptions = []
     
-    # Separate landmarks that need Google data vs. just descriptions
-    for item in landmarks_to_enhance[:max_api_calls]:
+    # PROCESS ALL LANDMARKS - no limit
+    for item in landmarks_to_enhance:  # Removed [:max_api_calls] limit
         block = item['block']
         priority = item['priority']
         
@@ -948,15 +944,11 @@ async def enhance_landmarks_cost_efficiently(
         for i in range(0, len(landmarks_needing_google_data), batch_size):
             batch = landmarks_needing_google_data[i:i + batch_size]
             
-            # Process batch in parallel
+            # Process batch in parallel - NO API LIMIT
             tasks = []
             for item in batch:
-                if api_calls_made < max_api_calls:
-                    task = enhance_single_landmark_photos(item['block'])
-                    tasks.append(task)
-                else:
-                    debug_print(f"💰 API limit reached, skipping {item['block'].name}")
-                    break
+                task = enhance_single_landmark_photos(item['block'])
+                tasks.append(task)
             
             if tasks:
                 results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -1002,9 +994,6 @@ async def enhance_landmarks_cost_efficiently(
     async def enhance_single_landmark_photos(block):
         """Enhance a single landmark with photos and basic data"""
         nonlocal api_calls_made
-        
-        if api_calls_made >= max_api_calls:
-            return False
             
         try:
             # Use places_nearby to find the landmark
@@ -1031,9 +1020,6 @@ async def enhance_landmarks_cost_efficiently(
             best_match = None
             
             for strategy in search_strategies:
-                if api_calls_made >= max_api_calls:
-                    break
-                    
                 results = await places_client.places_nearby(**strategy)
                 api_calls_made += 1
                 debug_print(f"   🔍 Search strategy for {block.name}: {len(results.get('results', []))} results")
@@ -1118,7 +1104,7 @@ async def enhance_landmarks_cost_efficiently(
                         debug_print(f"   🌐 Added website for {block.name}: {website}")
                     else:
                         # Try to get website from place details if we have place_id
-                        if best_match.get('place_id') and api_calls_made < max_api_calls:
+                        if best_match.get('place_id'):
                             try:
                                 place_details = await places_client.place_details(best_match['place_id'])
                                 api_calls_made += 1
@@ -1148,13 +1134,10 @@ async def enhance_landmarks_cost_efficiently(
     # Wait for both LLM and photo processing to complete
     await asyncio.gather(llm_task, photo_task)
     
-    # Report final coverage
-    enhanced_count = api_calls_made
-    coverage_percent = (enhanced_count / total_landmarks * 100) if total_landmarks > 0 else 0
-    
+    # Report final results
     debug_print(f"💰 Landmark enhancement complete:")
-    debug_print(f"   📊 Enhanced: {enhanced_count}/{total_landmarks} landmarks ({coverage_percent:.1f}% coverage)")
-    debug_print(f"   💸 API calls used: {api_calls_made}/{max_api_calls}")
+    debug_print(f"   📊 Enhanced: {api_calls_made}/{total_landmarks} landmarks")
+    debug_print(f"   💸 API calls used: {api_calls_made} (no limit)")
     
     return itinerary, api_calls_made
 
@@ -1522,19 +1505,21 @@ def _is_theme_park_day(day_plan: StructuredDayPlan) -> bool:
             name_lower = block.name.lower()
             duration_minutes = parse_duration_to_minutes(block.duration)
             
-            # Check for theme park keywords AND long duration (6+ hours)
+            # Check for theme park keywords
             theme_park_keywords = [
                 "disneyland", "disney", "universal", "six flags", "knott", 
                 "seaworld", "busch gardens", "cedar point", "magic kingdom",
-                "epcot", "hollywood studios", "animal kingdom"
+                "epcot", "hollywood studios", "animal kingdom", "islands of adventure",
+                "studios", "adventure", "theme park"
             ]
             
             is_theme_park_name = any(keyword in name_lower for keyword in theme_park_keywords)
             is_long_duration = duration_minutes >= 360  # 6+ hours
             
-            # Only consider it a theme park day if BOTH conditions are met
-            if is_theme_park_name and is_long_duration:
-                debug_print(f"🎢 Detected theme park day: {block.name} ({block.duration})")
+            # RELAXED DETECTION: Theme park name OR long duration (not both required)
+            # This ensures theme parks get proper meal treatment even with shorter durations
+            if is_theme_park_name or is_long_duration:
+                debug_print(f"🎢 Detected theme park day: {block.name} ({block.duration}) - name_match: {is_theme_park_name}, long_duration: {is_long_duration}")
                 return True
     
     debug_print(f"🏛️ Regular day detected")
