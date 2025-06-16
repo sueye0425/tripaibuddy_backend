@@ -130,6 +130,11 @@ class RedisCache:
 class GooglePlacesClient:
     def __init__(self, session: aiohttp.ClientSession, redis_client: Optional[RedisClient] = None):
         self.api_key = os.getenv('GOOGLE_PLACES_API_KEY')
+        self.logger = logging.getLogger(__name__)
+        if not self.api_key:
+            self.logger.critical("❌ GooglePlacesClient: No API key found!")
+        else:
+            self.logger.info("✅ GooglePlacesClient: API key loaded successfully")
         # Initialize GoogleRoutesClient with the same session
         self.routes_client = GoogleRoutesClient(session=session)
         self.rate_limits = {
@@ -171,8 +176,10 @@ class GooglePlacesClient:
 
         print(f"\n🌐 DEBUG: Places Nearby API Call")
         print(f"📍 URL: {url}")
-        print(f"📋 Params: {json.dumps(params, indent=2)}")
-        print(f"🔑 API Key: {self.api_key[:10]}..." if self.api_key else "❌ No API Key")
+        # Log params without API key for security
+        safe_params = {k: v for k, v in params.items() if k != 'key'}
+        safe_params['key'] = '✅ Configured' if params.get('key') else '❌ Missing'
+        print(f"📋 Params: {json.dumps(safe_params, indent=2)}")
         
         try:
             async with session.get(url, params=params, timeout=10) as response:
@@ -218,8 +225,10 @@ class GooglePlacesClient:
 
         print(f"\n🔍 DEBUG: Place Details API Call")
         print(f"📍 URL: {url}")
-        print(f"📋 Params: {json.dumps(params, indent=2)}")
-        print(f"🔑 API Key: {self.api_key[:10]}..." if self.api_key else "❌ No API Key")
+        # Log params without API key for security
+        safe_params = {k: v for k, v in params.items() if k != 'key'}
+        safe_params['key'] = '✅ Configured' if params.get('key') else '❌ Missing'
+        print(f"📋 Params: {json.dumps(safe_params, indent=2)}")
         print(f"⚡ Opening hours included: {include_opening_hours}")
         
         try:
@@ -666,10 +675,18 @@ class GooglePlacesClient:
             return True  # If we can't determine, assume it's open 
 
     async def geocode(self, destination: str) -> Optional[Dict[str, Any]]:
-        """Geocode a destination string to coordinates. Uses self.routes_client.reverse_geocode for consistency if preferred, 
+        """Geocode a destination string to coordinates with caching support.
+           Uses self.routes_client.reverse_geocode for consistency if preferred, 
            or can directly use the Geocoding API via self._session if geocode is a distinct capability.
            Current implementation uses a direct call similar to before but via the shared session.
         """
+        # Check cache first
+        cache_key = self.cache.get_key('geocode', destination=destination.lower().strip())
+        cached_location = await self.cache.get(cache_key)
+        if cached_location:
+            self.logger.info(f"Geocoding cache hit for {destination}")
+            return cached_location
+        
         session = await self.get_session() # Ensures session is available
         url = "https://maps.googleapis.com/maps/api/geocode/json" # Geocoding API URL
         params = {
@@ -682,8 +699,11 @@ class GooglePlacesClient:
                 response.raise_for_status()
                 result = await response.json()
                 if result.get('status') == 'OK' and result.get('results'):
-                    self.logger.debug(f"Geocoding (GooglePlacesClient) successful for {destination}")
-                    return result['results'][0]['geometry']['location']
+                    location = result['results'][0]['geometry']['location']
+                    # Cache the successful result
+                    await self.cache.set(cache_key, location, 'geocode')
+                    self.logger.debug(f"Geocoding (GooglePlacesClient) successful for {destination}, cached result")
+                    return location
                 self.logger.error(f"Geocoding (GooglePlacesClient) API error for {destination}: {result.get('status')}, message: {result.get('error_message', 'No error message')}")
                 return None
         except aiohttp.ClientResponseError as e:

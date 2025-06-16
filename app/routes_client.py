@@ -8,12 +8,13 @@ from datetime import datetime
 class GoogleRoutesClient:
     def __init__(self, session: aiohttp.ClientSession):
         self.api_key = os.getenv('GOOGLE_PLACES_API_KEY')
+        self.logger = logging.getLogger(__name__)
         if not self.api_key:
-            logging.critical("GOOGLE_PLACES_API_KEY environment variable is not set!")
+            self.logger.critical("GOOGLE_PLACES_API_KEY environment variable is not set!")
             raise ValueError("GOOGLE_PLACES_API_KEY environment variable is required")
+        self.logger.info("✅ GoogleRoutesClient: API key loaded successfully")
         self.base_url = "https://routes.googleapis.com/directions/v2:computeRoutes"
         self.geocoding_url = "https://maps.googleapis.com/maps/api/geocode/json"
-        self.logger = logging.getLogger(__name__)
         self._session = session
 
     async def reverse_geocode(self, location: Dict[str, float]) -> List[Dict[str, Any]]:

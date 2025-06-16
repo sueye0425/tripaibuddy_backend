@@ -235,30 +235,34 @@ async def add_restaurants_to_day_optimized(
             restaurant_data = await search_multiple_restaurants_near_location(
                 places_client, destination, theme_park_location, ["breakfast", "lunch", "dinner"], used_restaurants
             )
-            
-            debug_print(f"🍽️ Found {len(restaurant_data)} restaurants for theme park day")
-            
-            for i, (meal_type, start_time, duration) in enumerate(meal_schedule):
-                if i < len(restaurant_data):
-                    restaurant_block = ItineraryBlock(
-                        name=restaurant_data[i]["name"],
-                        type="restaurant",
-                        description=None,  # Restaurants don't need descriptions - website provides better info
-                        start_time=start_time,
-                        duration=duration,
-                        mealtime=meal_type,
-                        location=restaurant_data[i]["location"],
-                        place_id=restaurant_data[i]["place_id"],
-                        rating=restaurant_data[i]["rating"],
-                        address=restaurant_data[i]["address"],
-                        photo_url=restaurant_data[i]["photo_url"],
-                        website=restaurant_data[i]["website"]
-                    )
-                    restaurants.append(restaurant_block)
-                    used_restaurants.add(restaurant_data[i]["name"].lower())
-                    debug_print(f"   🍽️ {meal_type.title()}: {restaurant_data[i]['name']} at {start_time} ({duration})")
         else:
-            debug_print("⚠️ No theme park location found for restaurant search")
+            debug_print("⚠️ No theme park location found, using destination center for restaurant search")
+            # FALLBACK: Use destination center when theme park location is missing
+            restaurant_data = await search_multiple_restaurants_near_location(
+                places_client, destination, None, ["breakfast", "lunch", "dinner"], used_restaurants
+            )
+        
+        debug_print(f"🍽️ Found {len(restaurant_data)} restaurants for theme park day")
+        
+        for i, (meal_type, start_time, duration) in enumerate(meal_schedule):
+            if i < len(restaurant_data):
+                restaurant_block = ItineraryBlock(
+                    name=restaurant_data[i]["name"],
+                    type="restaurant",
+                    description=None,  # Restaurants don't need descriptions - website provides better info
+                    start_time=start_time,
+                    duration=duration,
+                    mealtime=meal_type,
+                    location=restaurant_data[i]["location"],
+                    place_id=restaurant_data[i]["place_id"],
+                    rating=restaurant_data[i]["rating"],
+                    address=restaurant_data[i]["address"],
+                    photo_url=restaurant_data[i]["photo_url"],
+                    website=restaurant_data[i]["website"]
+                )
+                restaurants.append(restaurant_block)
+                used_restaurants.add(restaurant_data[i]["name"].lower())
+                debug_print(f"   🍽️ {meal_type.title()}: {restaurant_data[i]['name']} at {start_time} ({duration})")
     
     else:
         # Regular day: Optimize based on landmark distribution

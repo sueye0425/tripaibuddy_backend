@@ -633,7 +633,7 @@ async def image_proxy(photoreference: str, maxwidth: int = 800, maxheight: Optio
         params = {
             "maxwidth": str(maxwidth),
             "photoreference": photoreference,
-            "key": places_client.api_key
+            "key": places_client.api_key  # API key used internally, not logged
         }
         if maxheight:
             params["maxheight"] = str(maxheight)
